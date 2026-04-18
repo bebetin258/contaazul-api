@@ -1,73 +1,58 @@
 from fastapi import FastAPI
 import requests
 import os
-import json
+import time
 
 app = FastAPI()
 
 BASE_URL = "https://api-v2.contaazul.com"
 
-# =========================
-# 📁 ARQUIVO DE TOKEN
-# =========================
-TOKEN_FILE = "token.json"
+# 🔑 ENV
+BASE64 = os.getenv("BASE64_AUTH")
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+
+# 🧠 CACHE EM MEMÓRIA
+TOKEN_CACHE = {
+    "access_token": None,
+    "expira_em": 0
+}
 
 
-def salvar_token(data):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(data, f)
-
-
-def carregar_token():
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            return json.load(f)
-    return None
-
-
-# =========================
-# 🔑 GERAR ACCESS TOKEN
-# =========================
 def get_access_token():
-    base64_auth = os.getenv("BASE64_AUTH")
+    agora = time.time()
 
-    token_data = carregar_token()
+    # ✅ usa cache
+    if TOKEN_CACHE["access_token"] and agora < TOKEN_CACHE["expira_em"]:
+        return TOKEN_CACHE["access_token"]
 
-    if not token_data:
-        raise Exception("Sem refresh token salvo")
-
-    refresh_token = token_data["refresh_token"]
+    print("🔄 Gerando novo token...")
 
     url = "https://auth.contaazul.com/oauth2/token"
 
     headers = {
-        "Authorization": f"Basic {base64_auth}",
+        "Authorization": f"Basic {BASE64}",
         "Content-Type": "application/x-www-form-urlencoded"
     }
 
     data = {
         "grant_type": "refresh_token",
-        "refresh_token": refresh_token
+        "refresh_token": REFRESH_TOKEN
     }
 
     response = requests.post(url, headers=headers, data=data)
 
     if response.status_code != 200:
-        print("ERRO TOKEN:", response.text)
-        raise Exception("Erro ao renovar token")
+        print("❌ ERRO TOKEN:", response.text)
+        raise Exception("Refresh token inválido")
 
-    novo = response.json()
+    token_data = response.json()
 
-    # 🔥 salva novo refresh token automaticamente
-    if "refresh_token" in novo:
-        salvar_token(novo)
+    TOKEN_CACHE["access_token"] = token_data["access_token"]
+    TOKEN_CACHE["expira_em"] = agora + 3500  # ~58 min
 
-    return novo["access_token"]
+    return TOKEN_CACHE["access_token"]
 
 
-# =========================
-# 🔄 PAGINAÇÃO REAL
-# =========================
 def get_all_pages(endpoint):
     token = get_access_token()
 
@@ -84,12 +69,19 @@ def get_all_pages(endpoint):
 
         response = requests.get(url, headers=headers)
 
+        # 🔁 se token expirou no meio
+        if response.status_code == 401:
+            print("🔁 Token expirou, renovando...")
+            TOKEN_CACHE["access_token"] = None
+            token = get_access_token()
+            headers["Authorization"] = f"Bearer {token}"
+            continue
+
         if response.status_code != 200:
-            print("ERRO API:", response.text)
+            print("❌ ERRO API:", response.text)
             break
 
         data = response.json()
-
         items = data.get("items", [])
 
         if not items:
@@ -97,21 +89,18 @@ def get_all_pages(endpoint):
 
         todos.extend(items)
 
-        print(f"Página {pagina} - {len(items)} registros")
-
         if len(items) < tamanho:
             break
 
         pagina += 1
 
-    print(f"TOTAL FINAL: {len(todos)}")
-
     return todos
 
 
-# =========================
-# 🌐 ENDPOINTS
-# =========================
+# ======================
+# ENDPOINTS
+# ======================
+
 @app.get("/")
 def home():
     return {"status": "API rodando 🚀"}
@@ -123,20 +112,20 @@ def categorias():
 
 
 @app.get("/contas-financeiras")
-def contas_financeiras():
+def contas():
     return get_all_pages("/v1/conta-financeira")
 
 
 @app.get("/centro-custo")
-def centro_custo():
+def centro():
     return get_all_pages("/v1/centro-custo")
 
 
 @app.get("/contas-pagar")
-def contas_pagar():
+def pagar():
     return get_all_pages("/v1/contas-a-pagar")
 
 
 @app.get("/contas-receber")
-def contas_receber():
+def receber():
     return get_all_pages("/v1/contas-a-receber")
