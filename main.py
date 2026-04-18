@@ -5,16 +5,17 @@ import os
 
 app = FastAPI()
 
-# 🔐 você pode colocar como variável de ambiente no Render depois
-BASE64 = os.getenv("N2xpOGlqdjJiYWJiYm05dHBtMzk4djBqOTE6ZGQ0Y2s5YjA1bWJsb285MjF0M2dwdWQ4YWtuMzFtdTk3YnIzOWhkbGZvYjhmYzd2Ymts")  # ou colar direto aqui se quiser
-REFRESH_TOKEN = os.getenv("eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.VjPywOSBRjS4sTteoaw2JhUkYMF2-_V4N34cMRY0bWHXlhGxyAWhA0A4dL3zwbaPwJuGJgXeRE8Kq8Vc2wUEqxXgGgIYpa_3X_dG7w4SVkNlzypTEHGBz7L6rZir4j9H1rGFQuGGItkq1YC2nZDWvQwX6Gd9AbASkf3AahaHnnosl9HEIeFPmQjIsffvvPApeaiCgcTP3F4ZYC12u1e9PmFJLGCNpQHO2-6x9yUkjhTMyyC9Mk3sZCBS8E5vWTuDfS-X5tHotVRq_5N6tTJ8Kds8qiKzmn0UnEBJAXSQvzbc1Ru3bHZkZQ2PhcPB32F-VGX_OE1Z_MUQKG1VsSsQGg.noEejNBO66mu02zU.xQNv48tedxqLPX7jHJBx29uPYPDfv60kFrWK4pyJ6tbd6wEWjo7QGXLEzzKeOWwsldbCgoeGLxwXifxCpv2BxrXU0Rm5TnYIzmPpvmHvwRBnMrwec1od0dQDD-p68WpgnKCvPmBQTJ5BnV6CGA4S5-vxQ9JptAFG3Df_GA_rvmtas8pI0H7eirGQOMpHJ2XwGDMZT3ojfwY-ceosVmGV1LeoekXocnT7zz1iwxyAMa21EMviwPXw_bR3XNYYKGFJNfpcr49g-RBIxhP3Ny-lM_ypepNr7One30cpAeMItJ4gC5tm7POxXHwKV54wK2RyjfaOIdHqDmg4As-7Kb8th4cnnVx_fkgX4vaZ65yHnSAAlxDFsoqy2dHra3U8KW3OER7Z5OdMy4n8gfLpqDOcLxMNUPDP1xwk0oXU4FIE_cUP4vsxLgJVOo5hhibLFJdZtPyHp_nlleB5mU6cdQCJ3j5sxBT3C3lRrWUbn7h-swdHSdqsyfnKiKGgXgXtvFty39ZBBOdK1EIV-xAsFrkZS2Qz-ujXzcA4Y68Svadal8BA6PC93RICItkl_K3RCVHSrrMdNLqkO8V_or0l3qGQFEVdFFI_VSu5Yi1tRGf4LNGE3jTupg6zwcmy2CsuW69VY9dM-uEsuyjPRLgD77ztvMW-CCYfPJiEJKnIgzBDYACi_MWFo-TgQLUCy9xXCAc5OpVwhM2EAj-knxgaTzgSu_RTrpCsN1l0-_G14wGN9Ro-GA6da-8QSuJN0fnGs8Rc17XUsSImJBwK_XIcj6hZigjR2p8J6QFQ_XOCH8HFikfRRAYvJDRYOkVlyNAnXKjIhhxXM9A2dr50zWflNB0EX-PtlTcwg1dOukXYHsFPGPuLtr06YSviQlpM9LgJlTOmbm2ozs3jbpP2d5in1_zDtZoYvURQZQhA6yrcOQ9li6DvZrAPrutXmPh_ZG5ps3GrD0RsZeBn0g3a9HseCGb2ocPP43iR_grgJnYjP3Aa9UEj_4mo5ES43j67-IIvoIA6g2I5f2AgmTdrJ_YSY2J9X1LlWSlVdVustpiZxFVKXlP5hnLbY3PI35ECt0oe1ibI1-E774bOT8OswJdE6VMBIo77NFUIR5dZPfIV7rBoxRLbB_ig7zlnoy-3ewuTPyTIHKyWuo_ik14w7FUKUNkp7vllWea7JaPYBG3ctWdun7W5dvlnlUfIvbcCmWAsmuwsNGSmC0OHlZPlXnSU9-DqGDo9YJd88VWjwXU-Sjj4Z-F4JAG8Q08-wYwAlxR3ppjNqTYUeb6NHEPwoPvR7Ol2OuHeovt1vKYYVi73-Ef-upL3GTkSDz_8M3nVy0Zw9xs1OfbnHTDKrt9UTnvEI5YQ9blwsvQGjIP3l715I5s6ym0UFFcU5xwAe6CijgHiOy8TKg.MCUPU_1gbq2OSPbuE6cPqw")
+BASE64 = os.getenv("N2xpOGlqdjJiYWJiYm05dHBtMzk4djBqOTE6ZGQ0Y2s5YjA1bWJsb285MjF0M2dwdWQ4YWtuMzFtdTk3YnIzOWhkbGZvYjhmYzd2Ymts")
+REFRESH_TOKEN = os.getenv("eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.kfayTl05UNlkyYygmp2hPE4Jmrvd281yOBtnrIjeKniCSf_65i6EM1epExN_L6oonZNAUUoiiRSfQ1v2AA0Otvn6jta89GS9ytMpoetssxPIPfxI4rLJKBLS_9m9qaS35BFW7weWtxQCxMprq7w9H2SwhFHzT4IoaBLkq193i2NC49RPXUiQZyWqIg0jqx0cK1Kzw4qRtEGaWYPFTbrfDtIpU0c1vyI7Oj0Q_ySC-xF-sR7DyO0v_canF13Y8ZE9Rc4ufbVB8QGRwU00ZL8YACWxfYvYoJf55nv_86v1FaVNmLTKUFYVhmtCpJLlsRu5jybsK38z_GLAJ6rVsXac-w.J7TDMLj-S-L_IoFk.ehFafd89sLQfxst-pDHGTOp08BUCkmmWkgyjuVXOGTjNgbO4vdgqdn4oQIxXMk9KlpYXnf41Fnzwaa-_43OnK9cAAcXE25tFgWC1hiCm16AmiIEtWMUGsI-aifG2z6u9x8St6usOsTevLpr2pA1V0G-vaOG7rIeDN-hsiJDiUAr09iizjxi5Rky0FPE_sMGCgIX20j7mCV1OPY_jNH2zZJGQjIY_UIhjK6WHpRCozbfuBR2k-r0t_znq51jE1xsgfrrGInE58cNjJJ-PtrKyZTxG8me7L9539gu6gkKM0tepmJSkJNFwhcyDruPjGNccJfcDpdWwDen44MoQPMKuu9_To5tRNP-TQSe7dgN7kT1HkTdYg0Eg2hbq0TTWtuNife-jARZccFhATBVxDjvqguVJzIsogdvCRexrDHN77KW5Q2h-K6oduddDnv6Gq1o3bdC9IuGb3NwkhHxVVPr6IXphU75W7N7BeHBxdjzMV-bmedae0GLGGy1lc3eSm0Mzrw4iAH5ChJEY0-Uv_lT35oscxGP55gBuW5-v6zO8cWk2FHywReLSenGE4NF07UOFEKR6squ5UErnkiWwuv63zt_2q9wDTrIezc4uqhB23VCMiqkOEB4evc-Y_iOXAiLJ-OKqTGZLYbHZbw7Iw5A7ZSy2tD_4YbZEveRGRsV0EoGIC6XwbRgVSnamKJZ8dX2v_8AhbMuYfzjRzYePlcMzlf9XeeqoRCyWmz9E6-eT6hwao0X8XI9w6oV1Fx0szDqVHFfz4B4eLXzAWZ3toPYF7xpB6N2oKKFe6wQuXhXMQaU6JANwOtDsYgnBZ4qp2O3Q_noqQIElUWF8761JNcHuzj65id1cHojSCfThmJKn3Uzif3Y-b6orQbn9qsir0A3zAKeim9Eh6Qu6LQDbUtYLY5AfETVz-rXeFW_kAghkDRmgxbnyabPemK8oQu8Zfct5pVecUIX4gs7qgErrLWLLdfB7RaYBLscZ3JMzPAQAosv_-5wmqhqL_FRezZ07uofjaSFLrfhESz6cOhMMqP-0HJi0PyFSMQ8AGBOzNFVCGWA4KafMvHtaj2LUMJ4sFA_RnKgPDmmitIFzdbpYwBBF52cnCE7EfRQg7AW01XqB4AX9sl6w5qt2LBwZbKNuTQCdUI7vB1KFbXN0TTsaoh83jtAW2sEdEvK029GSbpjpoUXb6afHv4uDelzDJOdZCBZ1KQDB9DJeaYAjf5d7xeWsyGKvZ_bLVyJ2nG4qbK649fPp4XZbNjHVXTkmyx50jaYHtU0VKatW6PZaAOLJkr5E2hdpa6YmBTzPPVJJOPxLJEQAK_hP7DbWoxxy4aacEFYdl0NhdvCz2w1MW92KxbtuFI9xYGzlwMgEfimsymy-dh0HqFkEPmWw8A0nIuOru8_17g.BR1vfSqrvgslurCxPxXBHw")
 
 ACCESS_TOKEN = None
 TOKEN_EXPIRATION = 0
 
+
 def get_access_token():
     global ACCESS_TOKEN, TOKEN_EXPIRATION
 
+    # 🔹 reaproveita token se ainda válido
     if ACCESS_TOKEN and time.time() < TOKEN_EXPIRATION:
         return ACCESS_TOKEN
 
@@ -29,9 +30,16 @@ def get_access_token():
 
     response = requests.post(url, headers=headers, data=payload)
 
-    print("TOKEN STATUS:", response.status_code)
+    print("===================================")
+    print("STATUS TOKEN:", response.status_code)
+    print("RESPOSTA TOKEN:", response.text)
+    print("===================================")
 
     data = response.json()
+
+    # 🔴 tratamento de erro real
+    if "access_token" not in data:
+        raise Exception(f"Erro ao gerar token: {data}")
 
     ACCESS_TOKEN = data["access_token"]
     TOKEN_EXPIRATION = time.time() + data["expires_in"] - 60
@@ -46,13 +54,20 @@ def home():
 
 @app.get("/dre-categorias")
 def dre_categorias():
-    token = get_access_token()
+    try:
+        token = get_access_token()
 
-    url = "https://api-v2.contaazul.com/v1/financeiro/categorias-dre"
+        url = "https://api-v2.contaazul.com/v1/financeiro/categorias-dre"
 
-    response = requests.get(
-        url,
-        headers={"Authorization": f"Bearer {token}"}
-    )
+        response = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"}
+        )
 
-    return response.json()
+        print("STATUS API:", response.status_code)
+        print("RESPOSTA API:", response.text)
+
+        return response.json()
+
+    except Exception as e:
+        return {"erro": str(e)}
