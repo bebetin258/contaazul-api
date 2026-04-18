@@ -1,28 +1,21 @@
-import os
 import requests
 from fastapi import FastAPI
 
 app = FastAPI()
 
-# =========================
-# 🔐 CONFIGURAÇÕES
-# =========================
-
 BASE_URL = "https://api-v2.contaazul.com"
 
 BASE64 = "N2xpOGlqdjJiYWJiYm05dHBtMzk4djBqOTE6ZGQ0Y2s5YjA1bWJsb285MjF0M2dwdWQ4YWtuMzFtdTk3YnIzOWhkbGZvYjhmYzd2Ymts"
-REFRESH_TOKEN = "eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.MOcPSvmoMk6dD2mc3O-_xh0DYl_cbZfVyufjuKraKck9dVwyK9-770cxAXDiGQrsNJow7j3PsdGTLjrarPJmhwSWn-aVt07Kl5XaOMTwcl4i5FyUlk_y7FGjQec0VbSxkxRmIyPMtmBMxiM2HgfW47WU7U70mkTWPEgbPdzpCWYyk3S3dytiMGihDp0sqyyXwWctluwNMApfRtiIHneuSlMjlsUobXSrgUrpgWcGWFapS1xaOFryXcvxHeAdaYoyG2_wjVNHsf6jjho_qRvFgJbFSWcrBkXocbOmX7WPP43fVI_Q81XUP13q1uSstlmMNyWRj3BGbET9OVymf7pWTQ.gtg1rOVVZOo78xzZ.S2JxZGNq31r6JqXoI5KktxRW5aUijKJEx3-YANQwvX-b7qagy0wPHHp7uQxRjYxZSKvf-gGHFZVBOxez6qnQx1Llkb2u-10bu5RBGPuG3TMmLDKNLg1N81scp7ofd27dTPyocNg9ape6bhmkoQmw2Z13HQ2NWb6wJ9W7vz8_4KvBysFc6PhHUfYXgFo4lzYN8kF5rCS0mJ9SvGulO-Howz54xnFNiRpVFDYB7cEcizUUJ6p189PWjiDG06A7JJfQavxjcwe6PFsOs7TYlNLdI9mFinjZ4n-5V97Z29hSHmeJ5aWC-V7YyKxTNY0IpF2Pcmy37OZ6TWn73pDw4uXvtqNl3FfSzWGnBXVauJQ2zoFCTO4sO_zxbsrZNLolqWDNJAkMhZ8cT7tEWweo5pzOTdL7o7JHDn3wNniqFHquLnLSwIe0qEsHqX_pMosfoQqTtx5d8-4tqL9vjeRyohos32tLnRx1Nx_Z-LeDco4pG_1DitblevInTXbuS17FpyfSoWhRYtGURtPTbaJfiyjZB4p2-S7x0Azpb2KoHlcOJAg90sk1t8nBjk6vb2eGPEb32hwHB-M6aHuVMbPAx3UEAiZyR1qyETwoM4_7HL79ZvLgVFbKBkpFEQD6UhQtweFwU-pMJEUrle5GezaUriAHPsIYhksyxyQo8snkwAX-FJjdeKiVBNT3YhDE-vlfRxzQi2qvHkGGO2KZo0nSbtmCNqGrE5Iv3Er3jD4caN_SgvPuYXoWheKfUNZJH7MAUsVn-I2knw1fYiPuZ8VLVaP4t1CQWctSWw0nz98LNXIIWFhOHqlcSk8x-j3b2CikRIPsv0DURw4bF6KhozVLIG6-CdF-cGWM3IuRm7q8e0FvPIFX_2cLkIp5L9pg1WOTTPLBlrXZ-fNX6hWulzNxlzf3Ew7x1d7kiilz62z2Xqai29JukrRs0KcI4_5UnFWw-p02fKSAONUZn3SHwWd4wSj1PGBvnpebxn2E4k3HsNrKwyirzVYAObhsL3JQ0LRt0MOCS-a1uxaN2Cr4chJT2u7FNBOQaQ9ntO9DhxgXBTdN_hW29ll0dGTmZmyJ-53zyHVfOD_I91-K-bpkDlTur0fsWH4_nL5hUcW6HMBITUHBnJw1CSNWmxwK0XEsa1jeqzHE0X4c2C2kpvR-UxG4lqgXAxv3xHMQYOqxJ-ISGYpfYWr_LWuckTgYFc5KGVRTR5taTvT9xGWL20wF7TLTqtTFREJZ0LX8fNabnsldC22KUb5X_mFQD7VGY-SfAHFZ0tyYxQ4_xJpqjT7XYb5K5w9PHK-Jmj9c_RYpHf2z7wQcYI4izw.404pc3yCq883fceS_TBelQ"
+REFRESH_TOKEN = "eyJjdHkiOiJKV1QiLCJlbmMiOiJBMjU2R0NNIiwiYWxnIjoiUlNBLU9BRVAifQ.ovlMLEv2uRRDt6HyY-v7SUaziCpsMTp4ew7EzKYEi66Y0ycgewtLsaoYkvPGT7ykbJWTjvDPXMMChFBpc-tM5dq_DGGIYWd18Jp25QmhCEL9tfDX8wrMHcBMgjgGngOrVcg52ftLX3FhpONy_MOq0X43gtMRlH1U1CKmZeoGyk5lw47S1VAlZq4G1Ks4YLIA5e7fx8giVod0z2I-ukez9hv3Ypv-BIu0XaCzHyIZtL-dG5g6Nc-KNjUTHm6tfO6Z5xCOWg8AqrqjzHtWwWqNsGWVm89FcmoriNcqwr6IMt6xXIVjUQa2cMYOrpBKkAoR4Y3ltT_03z5O6Vb6odk_4Q.3ZUsoT2zTUy6C6TL.TyXy0zBbUpegsKZEH40Aq-ngjrpLukIDShxO-kpNwzodlsnhsCHUgY0k7py-Ilt-8yXueowVTMOsWdLn-OOExe95JXOO6lz5E89vh7sNmadE7PlkgC5KgHE9owh6J5Aotytl2bsXLZHOXwzHkttfZU4mA15Du-sMB-56_dHr3I2aAegM2PBrYbiSh2QJT6p3UHHD-JR4lHK3fUGvtuf7jNtOLj08ApoQ7GyrBarjj4So9KgHFdKDRZI2nYypH2AuENKE8DSS7sSejdOJ_8FlElFt2VqBkxQzcUg_JmeQ9S_TAjdkmg_DBiV46cJdqfs9l-KxI4YPuQZnHDKgHgarS9b9SQ-uTSpeeX7Pez_NZajlT-Wm2nlw6MuEKYV-U0_xHHPtOcijrUT5qgemeyJz5R5tlf10cr6Z77DwQD4YfzuvoBJ8-UMMCVybdhLlJcEizjY6n37XoQZPMBUlVsOxhD17ROOaiw8XJZir7t2vJGrm_KpVf2HW3uwn0HTmKvv1eQbiESEevVeRhCtR5z89VEjQTAMGar7-jnr1zCtEelFfqjLE7CwcgVslZlht67Abq69HyLQVhBnt95qwzLFS2E0rMn9eGuzfuC_4b0r0_u8XVzHJVmymuo_6Rxud-bnYyUkHe4ySZzi-f4-psi2druyiTAGfjK0II8S66hCinifMZIhpS7SaTYQyjZJVBuxIO47sx6RpuT2ZLB7AvXoxLmQHVt2vUnaEwS-pO9MDtyjSbEzHNW3PUxTsfC5mkecqchsGiBntikbW32e4QRaIZpmaPPfLb9f6TMrgbs0vNKQoJ9q7k0nZpS2Boqei7DreiaXed7F2RlsfkTv0LdaMvVqYlG8c0jOe3_Bka49Now1TwXtnc4SLPEYxdQrgxdbZVH_RfYwE3Jw_Ltbbg-7gNh5nviXR6ALIsBTPawr5wwQQencCATN0FRdn2qusjT7UgNYA8NJaI1g14GOxfCLFkSd-FaVT_shTkF9eBVNOTmfxzjA-fUMlD0Gy6EYiTIofgY_INVKazzeFoEWovW15ICGaRCsSdXqiHUO2kS4pm0M-OAPJD0NG-urP3AQa4as6mYLrIbXKHe8YabNuUAMh4D0LnnPBpYgjU1mAWEnMHzEt30KLI_w4pmRPCiBmvqKdaVimY-o-G028pzhYbzgHDsLabp-kGZOVJSJ0ayJT3lX9FTQ9YPF57lZZZ6Qps-8bhJaGLA1HG8FuoL8I2mB1NI75Ixq93s9ki8R8sU4NdXik8pHtF1a6j6SVkgHZ1Yeau4qexJrcPYAWtoX1vmIpBQAQNqA1I-xkcp5mpl-zQXF4DrR2Q4z6YRI6l5M6V78JbW3Hsbv__2GbMjVWPojSmcxg9kNcXxXKSJ0fWbDqjq0ZZzi406QhHvf4ncqzVu2bg2BJbwU._VG-fwRiiL5wLiMXUIGPaA"
 
 ACCESS_TOKEN = None
 
 
 # =========================
-# 🔄 GERAR ACCESS TOKEN
+# 🔄 GERAR TOKEN
 # =========================
 
 def get_access_token():
-    global ACCESS_TOKEN
-
     url = "https://auth.contaazul.com/oauth2/token"
 
     headers = {
@@ -38,26 +31,18 @@ def get_access_token():
     response = requests.post(url, headers=headers, data=data)
 
     if response.status_code != 200:
-        return {
-            "erro": "erro_ao_gerar_token",
-            "status": response.status_code,
-            "detalhe": response.text
-        }
+        raise Exception(f"Erro ao gerar token: {response.text}")
 
-    json_data = response.json()
+    token_data = response.json()
 
-    if "access_token" not in json_data:
-        return {
-            "erro": "access_token_nao_encontrado",
-            "resposta": json_data
-        }
+    if "access_token" not in token_data:
+        raise Exception(f"Token inválido: {token_data}")
 
-    ACCESS_TOKEN = json_data["access_token"]
-    return ACCESS_TOKEN
+    return token_data["access_token"]
 
 
 # =========================
-# 🔗 CHAMADA API CONTA AZUL
+# 🔗 REQUEST COM RETRY
 # =========================
 
 def contaazul_get(endpoint, params=None):
@@ -77,8 +62,8 @@ def contaazul_get(endpoint, params=None):
         params=params
     )
 
-    # 🔄 se token expirou
-    if response.status_code == 401:
+    # 🔥 TOKEN EXPIRADO OU INVALIDO
+    if response.status_code == 401 or "Invalid token" in response.text:
         ACCESS_TOKEN = get_access_token()
 
         headers["Authorization"] = f"Bearer {ACCESS_TOKEN}"
@@ -89,27 +74,28 @@ def contaazul_get(endpoint, params=None):
             params=params
         )
 
+    if response.status_code != 200:
+        raise Exception(f"Erro API: {response.text}")
+
     return response.json()
 
 
 # =========================
-# 📄 PAGINAÇÃO AUTOMÁTICA
+# 📄 PAGINAÇÃO
 # =========================
 
-def get_all_pages(endpoint, params=None):
+def get_all_pages(endpoint):
     pagina = 1
     resultado = []
 
     while True:
-        query = {
-            "pagina": pagina,
-            "tamanho_pagina": 100
-        }
-
-        if params:
-            query.update(params)
-
-        data = contaazul_get(endpoint, query)
+        data = contaazul_get(
+            endpoint,
+            params={
+                "pagina": pagina,
+                "tamanho_pagina": 100
+            }
+        )
 
         if "itens" not in data:
             return data
@@ -126,39 +112,9 @@ def get_all_pages(endpoint, params=None):
 
 
 # =========================
-# 📊 ENDPOINTS PARA POWER BI
+# 📊 ENDPOINT
 # =========================
-
-@app.get("/")
-def home():
-    return {"status": "API Conta Azul rodando 🚀"}
-
 
 @app.get("/categorias")
 def categorias():
     return get_all_pages("/v1/categorias")
-
-
-@app.get("/contas-financeiras")
-def contas_financeiras():
-    return get_all_pages("/v1/conta-financeira")
-
-
-@app.get("/centro-custo")
-def centro_custo():
-    return get_all_pages("/v1/centro-custo")
-
-
-@app.get("/contas-pagar")
-def contas_pagar():
-    return get_all_pages("/v1/financeiro/contas-a-pagar")
-
-
-@app.get("/contas-receber")
-def contas_receber():
-    return get_all_pages("/v1/financeiro/contas-a-receber")
-
-
-@app.get("/saldo-bancario")
-def saldo_bancario():
-    return contaazul_get("/v1/financeiro/saldo-bancario")
