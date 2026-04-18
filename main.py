@@ -7,21 +7,25 @@ app = FastAPI()
 
 BASE_URL = "https://api-v2.contaazul.com"
 
-# 🔑 ENV
 BASE64 = os.getenv("BASE64_AUTH")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
-# 🧠 CACHE EM MEMÓRIA
+# =============================
+# 🧠 CACHE DE TOKEN
+# =============================
 TOKEN_CACHE = {
     "access_token": None,
     "expira_em": 0
 }
 
 
+# =============================
+# 🔑 GERAR ACCESS TOKEN
+# =============================
 def get_access_token():
     agora = time.time()
 
-    # ✅ usa cache
+    # usa cache
     if TOKEN_CACHE["access_token"] and agora < TOKEN_CACHE["expira_em"]:
         return TOKEN_CACHE["access_token"]
 
@@ -53,6 +57,9 @@ def get_access_token():
     return TOKEN_CACHE["access_token"]
 
 
+# =============================
+# 🔄 PAGINAÇÃO INTELIGENTE
+# =============================
 def get_all_pages(endpoint):
     token = get_access_token()
 
@@ -67,11 +74,13 @@ def get_all_pages(endpoint):
     while True:
         url = f"{BASE_URL}{endpoint}?pagina={pagina}&tamanho_pagina={tamanho}"
 
+        print(f"➡️ Chamando página {pagina}")
+
         response = requests.get(url, headers=headers)
 
-        # 🔁 se token expirou no meio
+        # 🔁 retry se token expirar
         if response.status_code == 401:
-            print("🔁 Token expirou, renovando...")
+            print("🔁 Token expirado, renovando...")
             TOKEN_CACHE["access_token"] = None
             token = get_access_token()
             headers["Authorization"] = f"Bearer {token}"
@@ -82,28 +91,48 @@ def get_all_pages(endpoint):
             break
 
         data = response.json()
-        items = data.get("items", [])
+
+        # 🔍 DEBUG (importante agora)
+        print("📦 RESPOSTA:", data)
+
+        # 🔥 SUPORTE A VÁRIOS FORMATOS
+        items = (
+            data.get("items")
+            or data.get("data")
+            or data.get("results")
+            or data
+        )
+
+        # se não for lista, força lista
+        if isinstance(items, dict):
+            items = [items]
 
         if not items:
+            print("⛔ Nenhum item retornado, encerrando paginação")
             break
 
         todos.extend(items)
 
+        print(f"✅ Página {pagina} trouxe {len(items)} registros")
+
+        # parada
         if len(items) < tamanho:
             break
 
         pagina += 1
 
+    print(f"🎯 TOTAL FINAL: {len(todos)} registros")
+
     return todos
 
 
-# ======================
-# ENDPOINTS
-# ======================
+# =============================
+# 🌐 ENDPOINTS
+# =============================
 
 @app.get("/")
 def home():
-    return {"status": "API rodando 🚀"}
+    return {"status": "API Conta Azul rodando 🚀"}
 
 
 @app.get("/categorias")
@@ -112,20 +141,20 @@ def categorias():
 
 
 @app.get("/contas-financeiras")
-def contas():
+def contas_financeiras():
     return get_all_pages("/v1/conta-financeira")
 
 
 @app.get("/centro-custo")
-def centro():
+def centro_custo():
     return get_all_pages("/v1/centro-custo")
 
 
 @app.get("/contas-pagar")
-def pagar():
+def contas_pagar():
     return get_all_pages("/v1/contas-a-pagar")
 
 
 @app.get("/contas-receber")
-def receber():
+def contas_receber():
     return get_all_pages("/v1/contas-a-receber")
