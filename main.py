@@ -6,25 +6,17 @@ import os
 app = FastAPI()
 
 # =========================================
-# CONFIG
+# 🔐 CONFIGURAÇÕES (ENV)
 # =========================================
-BASE64 = "SEU_BASE64_AQUI"
+BASE64 = os.getenv("BASE64_AUTH")
+
+if not BASE64:
+    raise Exception("BASE64_AUTH não definido no ambiente")
+
 TOKEN_FILE = "token.json"
 
 # =========================================
-# TOKEN EM MEMÓRIA (CACHE)
-# =========================================
-ACCESS_TOKEN = None
-
-# =========================================
-# SALVAR TOKEN
-# =========================================
-def salvar_token(data):
-    with open(TOKEN_FILE, "w") as f:
-        json.dump(data, f)
-
-# =========================================
-# LER TOKEN
+# 📥 LER TOKEN
 # =========================================
 def ler_token():
     if os.path.exists(TOKEN_FILE):
@@ -33,15 +25,20 @@ def ler_token():
     return None
 
 # =========================================
-# GERAR TOKEN NOVO
+# 💾 SALVAR TOKEN
+# =========================================
+def salvar_token(data):
+    with open(TOKEN_FILE, "w") as f:
+        json.dump(data, f)
+
+# =========================================
+# 🔄 GERAR ACCESS TOKEN (1x por requisição)
 # =========================================
 def gerar_token():
-    global ACCESS_TOKEN
-
     token_data = ler_token()
 
-    if not token_data:
-        raise Exception("token.json não encontrado")
+    if not token_data or "refresh_token" not in token_data:
+        raise Exception("token.json inválido ou ausente")
 
     url = "https://api-v2.contaazul.com/oauth2/token"
 
@@ -60,59 +57,36 @@ def gerar_token():
     if response.status_code != 200:
         raise Exception(f"Erro ao gerar token: {response.text}")
 
-    novo = response.json()
+    novo_token = response.json()
 
-    # 🔥 salva novo refresh_token
-    salvar_token(novo)
+    # 🔥 salva novo refresh_token (IMPORTANTE)
+    salvar_token(novo_token)
 
-    ACCESS_TOKEN = novo["access_token"]
-
-    return ACCESS_TOKEN
+    return novo_token["access_token"]
 
 # =========================================
-# PEGAR TOKEN (COM CACHE)
+# 🌐 REQUEST API
 # =========================================
-def get_token():
-    global ACCESS_TOKEN
-
-    if ACCESS_TOKEN:
-        return ACCESS_TOKEN
-
-    return gerar_token()
-
-# =========================================
-# REQUEST COM RETRY AUTOMÁTICO
-# =========================================
-def request_api(url, params=None):
-    global ACCESS_TOKEN
-
-    token = get_token()
-
+def request_api(url, token, params=None):
     headers = {
         "Authorization": f"Bearer {token}"
     }
 
-    r = requests.get(url, headers=headers, params=params)
+    response = requests.get(url, headers=headers, params=params)
 
-    # 🔥 Se token expirou → renova automaticamente
-    if r.status_code == 401:
-        print("Token expirado, renovando...")
+    if response.status_code != 200:
+        raise Exception(f"Erro API: {response.text}")
 
-        token = gerar_token()
-
-        headers["Authorization"] = f"Bearer {token}"
-
-        r = requests.get(url, headers=headers, params=params)
-
-    if r.status_code != 200:
-        raise Exception(f"Erro API: {r.text}")
-
-    return r.json()
+    return response.json()
 
 # =========================================
-# PAGINAÇÃO CORRETA
+# 🔁 PAGINAÇÃO COMPLETA
 # =========================================
 def get_all_pages(endpoint):
+
+    # 🔥 gera token UMA vez por chamada
+    token = gerar_token()
+
     url = f"https://api-v2.contaazul.com{endpoint}"
 
     pagina = 1
@@ -124,9 +98,9 @@ def get_all_pages(endpoint):
             "tamanho_pagina": 100
         }
 
-        print(f"Página {pagina}")
+        print(f"Buscando página {pagina}...")
 
-        data = request_api(url, params)
+        data = request_api(url, token, params)
 
         itens = data.get("items", [])
 
@@ -139,16 +113,16 @@ def get_all_pages(endpoint):
 
         pagina += 1
 
-    print(f"TOTAL: {len(resultado)}")
+    print(f"Total coletado: {len(resultado)} registros")
 
     return resultado
 
 # =========================================
-# ENDPOINTS
+# 🚀 ENDPOINTS
 # =========================================
 @app.get("/")
 def home():
-    return {"status": "ok"}
+    return {"status": "API Conta Azul rodando 🚀"}
 
 @app.get("/categorias")
 def categorias():
@@ -161,3 +135,11 @@ def contas_financeiras():
 @app.get("/centro-custo")
 def centro_custo():
     return get_all_pages("/v1/cost_centers")
+
+@app.get("/contas-pagar")
+def contas_pagar():
+    return get_all_pages("/v1/payables")
+
+@app.get("/contas-receber")
+def contas_receber():
+    return get_all_pages("/v1/receivables")
