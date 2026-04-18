@@ -11,7 +11,7 @@ BASE64 = os.getenv("BASE64_AUTH")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 # =============================
-# 🧠 CACHE DE TOKEN
+# CACHE DO TOKEN
 # =============================
 TOKEN_CACHE = {
     "access_token": None,
@@ -20,12 +20,11 @@ TOKEN_CACHE = {
 
 
 # =============================
-# 🔑 GERAR ACCESS TOKEN
+# GERAR ACCESS TOKEN
 # =============================
 def get_access_token():
     agora = time.time()
 
-    # usa cache
     if TOKEN_CACHE["access_token"] and agora < TOKEN_CACHE["expira_em"]:
         return TOKEN_CACHE["access_token"]
 
@@ -45,9 +44,11 @@ def get_access_token():
 
     response = requests.post(url, headers=headers, data=data)
 
+    print("STATUS TOKEN:", response.status_code)
+    print("RESPOSTA TOKEN:", response.text)
+
     if response.status_code != 200:
-        print("❌ ERRO TOKEN:", response.text)
-        raise Exception("Refresh token inválido")
+        raise Exception("❌ Refresh token inválido")
 
     token_data = response.json()
 
@@ -58,7 +59,7 @@ def get_access_token():
 
 
 # =============================
-# 🔄 PAGINAÇÃO INTELIGENTE
+# PAGINAÇÃO + DEBUG
 # =============================
 def get_all_pages(endpoint):
     token = get_access_token()
@@ -74,11 +75,15 @@ def get_all_pages(endpoint):
     while True:
         url = f"{BASE_URL}{endpoint}?pagina={pagina}&tamanho_pagina={tamanho}"
 
-        print(f"➡️ Chamando página {pagina}")
+        print("\n=============================")
+        print(f"➡️ URL: {url}")
 
         response = requests.get(url, headers=headers)
 
-        # 🔁 retry se token expirar
+        print("STATUS:", response.status_code)
+        print("RAW RESPONSE:", response.text[:1000])
+
+        # 🔁 Se token expirou
         if response.status_code == 401:
             print("🔁 Token expirado, renovando...")
             TOKEN_CACHE["access_token"] = None
@@ -92,42 +97,53 @@ def get_all_pages(endpoint):
 
         data = response.json()
 
-        # 🔍 DEBUG (importante agora)
-        print("📦 RESPOSTA:", data)
+        # 🔍 Debug estrutura
+        if isinstance(data, dict):
+            print("📦 JSON KEYS:", list(data.keys()))
+        else:
+            print("📦 JSON NÃO É DICT")
 
-        # 🔥 SUPORTE A VÁRIOS FORMATOS
-        items = (
-            data.get("items")
-            or data.get("data")
-            or data.get("results")
-            or data
-        )
+        # 🔥 Tratamento flexível
+        items = None
 
-        # se não for lista, força lista
+        if isinstance(data, dict):
+            if "items" in data:
+                items = data["items"]
+            elif "data" in data:
+                items = data["data"]
+            elif "results" in data:
+                items = data["results"]
+            elif "categorias" in data:
+                items = data["categorias"]
+            else:
+                print("⚠️ Estrutura desconhecida, usando data direto")
+                items = data
+        else:
+            items = data
+
+        # força lista
         if isinstance(items, dict):
             items = [items]
 
+        print(f"📊 Itens encontrados: {len(items) if items else 0}")
+
         if not items:
-            print("⛔ Nenhum item retornado, encerrando paginação")
             break
 
         todos.extend(items)
 
-        print(f"✅ Página {pagina} trouxe {len(items)} registros")
-
-        # parada
         if len(items) < tamanho:
             break
 
         pagina += 1
 
-    print(f"🎯 TOTAL FINAL: {len(todos)} registros")
+    print(f"\n🎯 TOTAL FINAL: {len(todos)} registros\n")
 
     return todos
 
 
 # =============================
-# 🌐 ENDPOINTS
+# ENDPOINTS
 # =============================
 
 @app.get("/")
