@@ -11,7 +11,7 @@ app = FastAPI()
 BASE_URL = "https://api-v2.contaazul.com"
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
-BASE64 = os.getenv("BASE64")  # client_id:client_secret em base64
+BASE64 = os.getenv("BASE64_AUTH")  # client_id:client_secret em base64
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 
