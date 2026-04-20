@@ -113,7 +113,7 @@ def get_all_pages(endpoint, params_extra=None):
 
         itens = data.get("items") or data.get("itens") or []
 
-        if not itens:
+        if not isinstance(itens, list) or len(itens) == 0:
             break
 
         resultado.extend(itens)
@@ -127,7 +127,14 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# ENDPOINTS PADRÃO
+# LIMPEZA (POWER BI SAFE)
+# =========================
+def limpar_lista(lista):
+    return [i for i in lista if isinstance(i, dict)]
+
+
+# =========================
+# ENDPOINTS
 # =========================
 @app.get("/")
 def home():
@@ -136,28 +143,36 @@ def home():
 
 @app.get("/categorias")
 def categorias():
-    return {"itens": get_all_pages("/v1/categorias")}
+    try:
+        dados = get_all_pages("/v1/categorias")
+        dados_limpos = limpar_lista(dados)
+        return {"itens": dados_limpos}
+    except Exception as e:
+        print("Erro categorias:", str(e))
+        return {"itens": []}
 
 
 @app.get("/centro-custo")
 def centro_custo():
-    return {"itens": get_all_pages("/v1/centro-de-custo")}
+    return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
 
 
 @app.get("/contas-financeiras")
 def contas_financeiras():
-    return {"itens": get_all_pages("/v1/conta-financeira")}
+    return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
 
 
 @app.get("/contas-receber")
 def contas_receber():
     return {
-        "itens": get_all_pages(
-            "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-            {
-                "data_vencimento_de": "2000-01-01",
-                "data_vencimento_ate": "2100-01-01"
-            }
+        "itens": limpar_lista(
+            get_all_pages(
+                "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+                {
+                    "data_vencimento_de": "2000-01-01",
+                    "data_vencimento_ate": "2100-01-01"
+                }
+            )
         )
     }
 
@@ -165,19 +180,18 @@ def contas_receber():
 @app.get("/contas-pagar")
 def contas_pagar():
     return {
-        "itens": get_all_pages(
-            "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-            {
-                "data_vencimento_de": "2000-01-01",
-                "data_vencimento_ate": "2100-01-01"
-            }
+        "itens": limpar_lista(
+            get_all_pages(
+                "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+                {
+                    "data_vencimento_de": "2000-01-01",
+                    "data_vencimento_ate": "2100-01-01"
+                }
+            )
         )
     }
 
 
-# =========================
-# CATEGORIAS DRE (FORMATO ORIGINAL)
-# =========================
 @app.get("/categorias-dre")
 def categorias_dre():
     try:
@@ -194,7 +208,6 @@ def categorias_dre():
 
         data = response.json()
 
-        # 🔥 GARANTE QUE RETORNA NO PADRÃO DO POWER BI
         if isinstance(data, dict):
             itens = data.get("itens", [])
         elif isinstance(data, list):
@@ -202,10 +215,7 @@ def categorias_dre():
         else:
             itens = []
 
-        # 🔥 LIMPA QUALQUER SUJEIRA
-        itens_limpos = [i for i in itens if isinstance(i, dict)]
-
-        return {"itens": itens_limpos}
+        return {"itens": limpar_lista(itens)}
 
     except Exception as e:
         print("Erro categorias-dre:", str(e))
