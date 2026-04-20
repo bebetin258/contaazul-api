@@ -25,26 +25,17 @@ def get_connection():
 def get_refresh_token():
     conn = get_connection()
     cur = conn.cursor()
-
     cur.execute("SELECT refresh_token FROM tokens WHERE id = 1")
     token = cur.fetchone()
-
     cur.close()
     conn.close()
-
     return token[0] if token else None
 
 
 def update_refresh_token(new_token):
     conn = get_connection()
     cur = conn.cursor()
-
-    cur.execute("""
-        UPDATE tokens
-        SET refresh_token = %s
-        WHERE id = 1
-    """, (new_token,))
-
+    cur.execute("UPDATE tokens SET refresh_token = %s WHERE id = 1", (new_token,))
     conn.commit()
     cur.close()
     conn.close()
@@ -55,9 +46,6 @@ def update_refresh_token(new_token):
 # =========================
 def get_access_token():
     refresh_token = get_refresh_token()
-
-    if not refresh_token:
-        raise Exception("Refresh token não encontrado")
 
     response = requests.post(
         TOKEN_URL,
@@ -72,10 +60,9 @@ def get_access_token():
     )
 
     if response.status_code != 200:
-        raise Exception(f"Erro token: {response.text}")
+        raise Exception(response.text)
 
     data = response.json()
-
     update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
@@ -91,10 +78,7 @@ def get_all_pages(endpoint, params_extra=None):
     resultado = []
 
     while True:
-        params = {
-            "pagina": pagina,
-            "tamanho_pagina": 100
-        }
+        params = {"pagina": pagina, "tamanho_pagina": 100}
 
         if params_extra:
             params.update(params_extra)
@@ -106,14 +90,13 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print("Erro API:", response.text)
+            print(response.text)
             break
 
         data = response.json()
-
         itens = data.get("items") or data.get("itens") or []
 
-        if not isinstance(itens, list) or len(itens) == 0:
+        if not itens:
             break
 
         resultado.extend(itens)
@@ -127,117 +110,115 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# LIMPEZA LISTA
+# LIMPEZA UNIVERSAL
 # =========================
+def limpar_dict(d):
+    if not isinstance(d, dict):
+        return None
+
+    return {k: ("" if v is None else v) for k, v in d.items()}
+
+
 def limpar_lista(lista):
-    return [i for i in lista if isinstance(i, dict)]
+    resultado = []
+    for item in lista:
+        limpo = limpar_dict(item)
+        if limpo:
+            resultado.append(limpo)
+    return resultado
 
 
 # =========================
 # ENDPOINTS
 # =========================
+
 @app.get("/")
 def home():
-    return {"status": "API Conta Azul OK 🚀"}
+    return {"status": "API OK 🚀"}
 
 
-# 🔥 CATEGORIAS → LISTA PURA (SEU M USA Table.FromList)
 @app.get("/categorias")
 def categorias():
-    try:
-        dados = get_all_pages("/v1/categorias")
+    dados = get_all_pages("/v1/categorias")
 
-        resultado = []
+    resultado = []
+    for item in dados:
+        if isinstance(item, dict):
+            resultado.append({
+                "id": str(item.get("id", "")),
+                "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
+                "nome": str(item.get("nome", "")),
+                "categoria_pai": str(item.get("categoria_pai", "")),
+                "tipo": str(item.get("tipo", "")),
+                "entrada_dre": str(item.get("entrada_dre", "")),
+                "considera_custo_dre": bool(item.get("considera_custo_dre", False))
+            })
 
-        for item in dados:
-            if isinstance(item, dict):
-                resultado.append({
-                    "id": str(item.get("id", "")),
-                    "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
-                    "nome": str(item.get("nome", "")),
-                    "categoria_pai": str(item.get("categoria_pai", "")),
-                    "tipo": str(item.get("tipo", "")),
-                    "entrada_dre": str(item.get("entrada_dre", "")),
-                    "considera_custo_dre": bool(item.get("considera_custo_dre", False))
-                })
-
-        return resultado  # 🔥 LISTA PURA
-
-    except Exception as e:
-        print("Erro categorias:", str(e))
-        return []
+    return resultado
 
 
-# 🔥 CENTRO DE CUSTO
+# =========================
+# 🔥 CONTAS A RECEBER (CORRIGIDO)
+# =========================
+@app.get("/contas-receber")
+def contas_receber():
+    dados = get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        {
+            "data_vencimento_de": "2000-01-01",
+            "data_vencimento_ate": "2100-01-01"
+        }
+    )
+
+    return limpar_lista(dados)
+
+
+# =========================
+# 🔥 CONTAS A PAGAR (CORRIGIDO)
+# =========================
+@app.get("/contas-pagar")
+def contas_pagar():
+    dados = get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+        {
+            "data_vencimento_de": "2000-01-01",
+            "data_vencimento_ate": "2100-01-01"
+        }
+    )
+
+    return limpar_lista(dados)
+
+
+# =========================
+# OUTROS
+# =========================
 @app.get("/centro-custo")
 def centro_custo():
     return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
 
 
-# 🔥 CONTAS FINANCEIRAS
 @app.get("/contas-financeiras")
 def contas_financeiras():
     return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
 
 
-# 🔥 CONTAS RECEBER
-@app.get("/contas-receber")
-def contas_receber():
-    return {
-        "itens": limpar_lista(
-            get_all_pages(
-                "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-                {
-                    "data_vencimento_de": "2000-01-01",
-                    "data_vencimento_ate": "2100-01-01"
-                }
-            )
-        )
-    }
-
-
-# 🔥 CONTAS PAGAR
-@app.get("/contas-pagar")
-def contas_pagar():
-    return {
-        "itens": limpar_lista(
-            get_all_pages(
-                "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-                {
-                    "data_vencimento_de": "2000-01-01",
-                    "data_vencimento_ate": "2100-01-01"
-                }
-            )
-        )
-    }
-
-
-# 🔥 CATEGORIAS DRE (FORMATO COM ITENS)
 @app.get("/categorias-dre")
 def categorias_dre():
-    try:
-        token = get_access_token()
+    token = get_access_token()
 
-        response = requests.get(
-            f"{BASE_URL}/v1/financeiro/categorias-dre",
-            headers={"Authorization": f"Bearer {token}"}
-        )
+    response = requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers={"Authorization": f"Bearer {token}"}
+    )
 
-        if response.status_code != 200:
-            print(response.text)
-            return {"itens": []}
-
-        data = response.json()
-
-        if isinstance(data, dict):
-            itens = data.get("itens", [])
-        elif isinstance(data, list):
-            itens = data
-        else:
-            itens = []
-
-        return {"itens": limpar_lista(itens)}
-
-    except Exception as e:
-        print("Erro categorias-dre:", str(e))
+    if response.status_code != 200:
         return {"itens": []}
+
+    data = response.json()
+
+    if isinstance(data, dict):
+        itens = data.get("itens", [])
+    else:
+        itens = data
+
+    return {"itens": limpar_lista(itens)}
