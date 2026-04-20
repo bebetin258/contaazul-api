@@ -32,10 +32,7 @@ def get_refresh_token():
     cur.close()
     conn.close()
 
-    if not token:
-        raise Exception("❌ Refresh token não encontrado")
-
-    return token[0]
+    return token[0] if token else None
 
 
 def update_refresh_token(new_token):
@@ -59,6 +56,9 @@ def update_refresh_token(new_token):
 def get_access_token():
     refresh_token = get_refresh_token()
 
+    if not refresh_token:
+        raise Exception("Refresh token não encontrado")
+
     response = requests.post(
         TOKEN_URL,
         headers={
@@ -77,22 +77,20 @@ def get_access_token():
 
     data = response.json()
 
-    # salva novo refresh_token
+    # 🔥 sempre atualiza o refresh_token
     update_refresh_token(data["refresh_token"])
-
-    print("✅ Token renovado com sucesso")
 
     return data["access_token"]
 
 
 # =========================
-# PAGINAÇÃO GENÉRICA
+# PAGINAÇÃO PADRÃO
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     access_token = get_access_token()
 
     pagina = 1
-    resultado = []
+    resultado_final = []
 
     while True:
         params = {
@@ -110,29 +108,31 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print("❌ ERRO API:", response.text)
-            return []  # 🔥 nunca quebra Power BI
+            print(f"❌ ERRO API ({endpoint}):", response.text)
+            break
 
         data = response.json()
 
-        # suporta qualquer formato
-        itens = data.get("items") or data.get("data") or data
-
-        if not isinstance(itens, list):
-            print("⚠️ Formato inesperado:", data)
-            return []
+        # 🔥 TRATAMENTO UNIVERSAL
+        if isinstance(data, dict):
+            itens = data.get("items") or data.get("itens") or []
+        elif isinstance(data, list):
+            itens = data
+        else:
+            print("⚠️ formato inesperado:", data)
+            break
 
         if not itens:
             break
 
-        resultado.extend(itens)
+        resultado_final.extend(itens)
 
         if len(itens) < 100:
             break
 
         pagina += 1
 
-    return resultado
+    return resultado_final
 
 
 # =========================
@@ -140,7 +140,7 @@ def get_all_pages(endpoint, params_extra=None):
 # =========================
 @app.get("/")
 def home():
-    return {"status": "API Conta Azul OK 🚀"}
+    return {"status": "API rodando 🚀"}
 
 
 @app.get("/categorias")
@@ -153,6 +153,12 @@ def centro_custo():
     return get_all_pages("/v1/centro-de-custo")
 
 
+@app.get("/contas-financeiras")
+def contas_financeiras():
+    return get_all_pages("/v1/conta-financeira")
+
+
+# 🔥 DRE CORRIGIDO (SEU PROBLEMA PRINCIPAL)
 @app.get("/categorias-dre")
 def categorias_dre():
     access_token = get_access_token()
@@ -168,18 +174,15 @@ def categorias_dre():
 
     data = response.json()
 
+    # 🔥 GARANTE LISTA
+    if isinstance(data, dict):
+        return data.get("itens", [])
+
     if isinstance(data, list):
         return data
 
-    if isinstance(data, dict):
-        return data.get("items") or data.get("data") or []
-
+    print("⚠️ formato inesperado:", data)
     return []
-
-
-@app.get("/contas-financeiras")
-def contas_financeiras():
-    return get_all_pages("/v1/conta-financeira")
 
 
 @app.get("/contas-receber")
@@ -188,7 +191,7 @@ def contas_receber():
         "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
         {
             "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
+            "data_vencimento_ate": "2100-12-31"
         }
     )
 
@@ -199,6 +202,6 @@ def contas_pagar():
         "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
         {
             "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
+            "data_vencimento_ate": "2100-12-31"
         }
     )
