@@ -47,6 +47,9 @@ def update_refresh_token(new_token):
 def get_access_token():
     refresh_token = get_refresh_token()
 
+    if not refresh_token:
+        raise Exception("Refresh token não encontrado")
+
     response = requests.post(
         TOKEN_URL,
         headers={
@@ -90,7 +93,7 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print(response.text)
+            print("Erro API:", response.text)
             break
 
         data = response.json()
@@ -110,21 +113,16 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# LIMPEZA UNIVERSAL
+# LIMPEZA
 # =========================
-def limpar_dict(d):
-    if not isinstance(d, dict):
-        return None
-
-    return {k: ("" if v is None else v) for k, v in d.items()}
-
-
 def limpar_lista(lista):
     resultado = []
     for item in lista:
-        limpo = limpar_dict(item)
-        if limpo:
-            resultado.append(limpo)
+        if isinstance(item, dict):
+            resultado.append({
+                k: ("" if v is None else v)
+                for k, v in item.items()
+            })
     return resultado
 
 
@@ -134,32 +132,36 @@ def limpar_lista(lista):
 
 @app.get("/")
 def home():
-    return {"status": "API OK 🚀"}
+    return {"status": "API Conta Azul OK 🚀"}
 
 
+# 🔹 CATEGORIAS → LISTA PURA
 @app.get("/categorias")
 def categorias():
-    dados = get_all_pages("/v1/categorias")
+    try:
+        dados = get_all_pages("/v1/categorias")
 
-    resultado = []
-    for item in dados:
-        if isinstance(item, dict):
-            resultado.append({
-                "id": str(item.get("id", "")),
-                "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
-                "nome": str(item.get("nome", "")),
-                "categoria_pai": str(item.get("categoria_pai", "")),
-                "tipo": str(item.get("tipo", "")),
-                "entrada_dre": str(item.get("entrada_dre", "")),
-                "considera_custo_dre": bool(item.get("considera_custo_dre", False))
-            })
+        resultado = []
+        for item in dados:
+            if isinstance(item, dict):
+                resultado.append({
+                    "id": str(item.get("id", "")),
+                    "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
+                    "nome": str(item.get("nome", "")),
+                    "categoria_pai": str(item.get("categoria_pai", "")),
+                    "tipo": str(item.get("tipo", "")),
+                    "entrada_dre": str(item.get("entrada_dre", "")),
+                    "considera_custo_dre": bool(item.get("considera_custo_dre", False))
+                })
 
-    return resultado
+        return resultado
+
+    except Exception as e:
+        print("Erro categorias:", str(e))
+        return []
 
 
-# =========================
-# 🔥 CONTAS A RECEBER (CORRIGIDO)
-# =========================
+# 🔹 CONTAS RECEBER → LISTA PURA
 @app.get("/contas-receber")
 def contas_receber():
     dados = get_all_pages(
@@ -169,13 +171,10 @@ def contas_receber():
             "data_vencimento_ate": "2100-01-01"
         }
     )
-
     return limpar_lista(dados)
 
 
-# =========================
-# 🔥 CONTAS A PAGAR (CORRIGIDO)
-# =========================
+# 🔹 CONTAS PAGAR → LISTA PURA
 @app.get("/contas-pagar")
 def contas_pagar():
     dados = get_all_pages(
@@ -185,40 +184,65 @@ def contas_pagar():
             "data_vencimento_ate": "2100-01-01"
         }
     )
-
     return limpar_lista(dados)
 
 
-# =========================
-# OUTROS
-# =========================
+# 🔹 VENDAS → LISTA PURA
+@app.get("/vendas")
+def vendas(data_inicio: str = "2000-01-01", data_fim: str = "2100-01-01"):
+    try:
+        dados = get_all_pages(
+            "/v1/venda/busca",
+            {
+                "data_inicio": data_inicio,
+                "data_fim": data_fim
+            }
+        )
+        return limpar_lista(dados)
+
+    except Exception as e:
+        print("Erro vendas:", str(e))
+        return []
+
+
+# 🔹 CENTRO DE CUSTO → COM "itens"
 @app.get("/centro-custo")
 def centro_custo():
     return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
 
 
+# 🔹 CONTAS FINANCEIRAS → COM "itens"
 @app.get("/contas-financeiras")
 def contas_financeiras():
     return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
 
 
+# 🔹 CATEGORIAS DRE → COM "itens"
 @app.get("/categorias-dre")
 def categorias_dre():
-    token = get_access_token()
+    try:
+        token = get_access_token()
 
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers={"Authorization": f"Bearer {token}"}
-    )
+        response = requests.get(
+            f"{BASE_URL}/v1/financeiro/categorias-dre",
+            headers={"Authorization": f"Bearer {token}"}
+        )
 
-    if response.status_code != 200:
+        if response.status_code != 200:
+            print(response.text)
+            return {"itens": []}
+
+        data = response.json()
+
+        if isinstance(data, dict):
+            itens = data.get("itens", [])
+        elif isinstance(data, list):
+            itens = data
+        else:
+            itens = []
+
+        return {"itens": limpar_lista(itens)}
+
+    except Exception as e:
+        print("Erro categorias-dre:", str(e))
         return {"itens": []}
-
-    data = response.json()
-
-    if isinstance(data, dict):
-        itens = data.get("itens", [])
-    else:
-        itens = data
-
-    return {"itens": limpar_lista(itens)}
