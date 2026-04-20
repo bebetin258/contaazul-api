@@ -72,12 +72,11 @@ def get_access_token():
     )
 
     if response.status_code != 200:
-        print("❌ ERRO TOKEN:", response.text)
-        raise Exception("Erro ao renovar token")
+        raise Exception(f"Erro token: {response.text}")
 
     data = response.json()
 
-    # 🔥 sempre atualiza o refresh_token
+    # 🔥 SEMPRE ATUALIZA O REFRESH TOKEN
     update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
@@ -87,10 +86,10 @@ def get_access_token():
 # PAGINAÇÃO PADRÃO
 # =========================
 def get_all_pages(endpoint, params_extra=None):
-    access_token = get_access_token()
+    token = get_access_token()
 
     pagina = 1
-    resultado_final = []
+    resultado = []
 
     while True:
         params = {
@@ -103,36 +102,72 @@ def get_all_pages(endpoint, params_extra=None):
 
         response = requests.get(
             f"{BASE_URL}{endpoint}",
-            headers={"Authorization": f"Bearer {access_token}"},
+            headers={"Authorization": f"Bearer {token}"},
             params=params
         )
 
         if response.status_code != 200:
-            print(f"❌ ERRO API ({endpoint}):", response.text)
+            print(response.text)
             break
 
         data = response.json()
 
-        # 🔥 TRATAMENTO UNIVERSAL
-        if isinstance(data, dict):
-            itens = data.get("items") or data.get("itens") or []
-        elif isinstance(data, list):
-            itens = data
-        else:
-            print("⚠️ formato inesperado:", data)
-            break
+        itens = data.get("items") or data.get("itens") or []
 
         if not itens:
             break
 
-        resultado_final.extend(itens)
+        resultado.extend(itens)
 
         if len(itens) < 100:
             break
 
         pagina += 1
 
-    return resultado_final
+    return resultado
+
+
+# =========================
+# FLATTEN DRE (PADRÃO BI)
+# =========================
+def flatten_dre(data):
+    resultado = []
+
+    def percorrer(item, nivel_1=None, nivel_2=None):
+        desc = item.get("descricao", "")
+
+        if not nivel_1:
+            nivel_1 = desc
+        elif not nivel_2:
+            nivel_2 = desc
+
+        categorias = item.get("categorias_financeiras") or []
+
+        if categorias:
+            for cat in categorias:
+                resultado.append({
+                    "nivel_1": str(nivel_1 or ""),
+                    "nivel_2": str(nivel_2 or ""),
+                    "categoria_financeira": str(cat.get("nome") or ""),
+                    "codigo_categoria": str(cat.get("codigo") or ""),
+                    "ativo": bool(cat.get("ativo", False))
+                })
+        else:
+            resultado.append({
+                "nivel_1": str(nivel_1 or ""),
+                "nivel_2": str(nivel_2 or ""),
+                "categoria_financeira": "",
+                "codigo_categoria": "",
+                "ativo": False
+            })
+
+        for sub in item.get("subitens") or []:
+            percorrer(sub, nivel_1, nivel_2)
+
+    for item in data:
+        percorrer(item)
+
+    return resultado
 
 
 # =========================
@@ -140,7 +175,7 @@ def get_all_pages(endpoint, params_extra=None):
 # =========================
 @app.get("/")
 def home():
-    return {"status": "API rodando 🚀"}
+    return {"status": "API Conta Azul OK 🚀"}
 
 
 @app.get("/categorias")
@@ -158,31 +193,29 @@ def contas_financeiras():
     return get_all_pages("/v1/conta-financeira")
 
 
-# 🔥 DRE CORRIGIDO (SEU PROBLEMA PRINCIPAL)
 @app.get("/categorias-dre")
 def categorias_dre():
-    access_token = get_access_token()
+    token = get_access_token()
 
     response = requests.get(
         f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers={"Authorization": f"Bearer {access_token}"}
+        headers={"Authorization": f"Bearer {token}"}
     )
 
     if response.status_code != 200:
-        print("❌ ERRO DRE:", response.text)
+        print(response.text)
         return []
 
     data = response.json()
 
-    # 🔥 GARANTE LISTA
+    # 🔥 GARANTE LISTA (NUNCA QUEBRA O BI)
     if isinstance(data, dict):
-        return data.get("itens", [])
+        data = data.get("itens", [])
 
-    if isinstance(data, list):
-        return data
+    if not isinstance(data, list):
+        return []
 
-    print("⚠️ formato inesperado:", data)
-    return []
+    return flatten_dre(data)
 
 
 @app.get("/contas-receber")
@@ -191,7 +224,7 @@ def contas_receber():
         "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
         {
             "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-12-31"
+            "data_vencimento_ate": "2100-01-01"
         }
     )
 
@@ -202,6 +235,6 @@ def contas_pagar():
         "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
         {
             "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-12-31"
+            "data_vencimento_ate": "2100-01-01"
         }
     )
