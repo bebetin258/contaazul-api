@@ -18,7 +18,7 @@ if not BASE64 or not DATABASE_URL:
     raise Exception("Variáveis de ambiente não configuradas")
 
 # =========================
-# CONEXÃO BANCO
+# CONEXÃO BANCO (SUPABASE)
 # =========================
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -78,7 +78,7 @@ def get_access_token():
 
     data = response.json()
 
-    # 🔥 Atualiza SEMPRE o refresh_token
+    # 🔥 Sempre atualizar o refresh_token
     if "refresh_token" in data:
         update_refresh_token(data["refresh_token"])
 
@@ -86,26 +86,29 @@ def get_access_token():
 
 
 # =========================
-# PAGINAÇÃO COMPLETA
+# PAGINAÇÃO GENÉRICA
 # =========================
-def get_all_pages(endpoint):
+def get_all_pages(endpoint, extra_params=None):
     access_token = get_access_token()
 
     pagina = 1
     resultado_final = []
 
     while True:
-        print(f"Buscando página {pagina}")
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": 100
+        }
+
+        if extra_params:
+            params.update(extra_params)
 
         response = requests.get(
             f"{BASE_URL}{endpoint}",
             headers={
                 "Authorization": f"Bearer {access_token}"
             },
-            params={
-                "pagina": pagina,
-                "tamanho_pagina": 100
-            }
+            params=params
         )
 
         if response.status_code != 200:
@@ -113,10 +116,7 @@ def get_all_pages(endpoint):
 
         data = response.json()
 
-        # 🔥 Compatibilidade Conta Azul (itens OU items)
         itens = data.get("itens") or data.get("items") or []
-
-        print(f"Página {pagina} trouxe {len(itens)} registros")
 
         if not itens:
             break
@@ -128,19 +128,19 @@ def get_all_pages(endpoint):
 
         pagina += 1
 
-    print(f"Total final: {len(resultado_final)} registros")
-
     return resultado_final
 
 
 # =========================
 # ENDPOINTS
 # =========================
+
 @app.get("/")
 def home():
     return {"status": "API Conta Azul rodando 🚀"}
 
 
+# 📊 CATEGORIAS
 @app.get("/categorias")
 def categorias():
     try:
@@ -149,33 +149,72 @@ def categorias():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/contas-financeiras")
-def contas_financeiras():
-    try:
-        return get_all_pages("/v1/conta-financeira")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
+# 📊 CENTRO DE CUSTO
 @app.get("/centro-custo")
 def centro_custo():
     try:
-        return get_all_pages("/v1/centro-custo")
+        return get_all_pages("/v1/centro-de-custo")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/contas-pagar")
-def contas_pagar():
+# 📊 CATEGORIAS DRE
+@app.get("/categorias-dre")
+def categorias_dre():
     try:
-        return get_all_pages("/v1/contas-pagar")
+        access_token = get_access_token()
+
+        response = requests.get(
+            f"{BASE_URL}/v1/financeiro/categorias-dre",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+
+        return response.json()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# 📊 CONTAS FINANCEIRAS
+@app.get("/contas-financeiras")
+def contas_financeiras():
+    try:
+        access_token = get_access_token()
+
+        response = requests.get(
+            f"{BASE_URL}/v1/conta-financeira",
+            headers={"Authorization": f"Bearer {access_token}"}
+        )
+
+        return response.json()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 💰 CONTAS A RECEBER (TODAS AS DATAS)
 @app.get("/contas-receber")
 def contas_receber():
     try:
-        return get_all_pages("/v1/contas-receber")
+        return get_all_pages(
+            "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            {
+                "data_vencimento_de": "2026-01-01",
+                "data_vencimento_ate": "2026-12-31"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# 💸 CONTAS A PAGAR (TODAS AS DATAS)
+@app.get("/contas-pagar")
+def contas_pagar():
+    try:
+        return get_all_pages(
+            "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+            {
+                "data_vencimento_de": "2026-01-01",
+                "data_vencimento_ate": "2026-12-31"
+            }
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
