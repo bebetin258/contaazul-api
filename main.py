@@ -72,11 +72,11 @@ def get_access_token():
     )
 
     if response.status_code != 200:
-        raise Exception(f"Erro token: {response.text}")
+        raise Exception(f"Erro ao renovar token: {response.text}")
 
     data = response.json()
 
-    # 🔥 SEMPRE ATUALIZA O REFRESH TOKEN
+    # 🔥 Atualiza SEMPRE o refresh_token
     update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
@@ -107,14 +107,14 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print(response.text)
+            print("Erro API:", response.text)
             break
 
         data = response.json()
 
         itens = data.get("items") or data.get("itens") or []
 
-        if not itens:
+        if not isinstance(itens, list) or len(itens) == 0:
             break
 
         resultado.extend(itens)
@@ -128,44 +128,54 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# FLATTEN DRE (PADRÃO BI)
+# FLATTEN DRE (POWER BI SAFE)
 # =========================
 def flatten_dre(data):
     resultado = []
 
     def percorrer(item, nivel_1=None, nivel_2=None):
-        desc = item.get("descricao", "")
+        try:
+            desc = item.get("descricao", "")
 
-        if not nivel_1:
-            nivel_1 = desc
-        elif not nivel_2:
-            nivel_2 = desc
+            if not nivel_1:
+                nivel_1 = desc
+            elif not nivel_2:
+                nivel_2 = desc
 
-        categorias = item.get("categorias_financeiras") or []
+            categorias = item.get("categorias_financeiras") or []
 
-        if categorias:
-            for cat in categorias:
+            if isinstance(categorias, list) and categorias:
+                for cat in categorias:
+                    if isinstance(cat, dict):
+                        resultado.append({
+                            "nivel_1": str(nivel_1 or ""),
+                            "nivel_2": str(nivel_2 or ""),
+                            "categoria_financeira": str(cat.get("nome") or ""),
+                            "codigo_categoria": str(cat.get("codigo") or ""),
+                            "ativo": bool(cat.get("ativo", False))
+                        })
+            else:
                 resultado.append({
                     "nivel_1": str(nivel_1 or ""),
                     "nivel_2": str(nivel_2 or ""),
-                    "categoria_financeira": str(cat.get("nome") or ""),
-                    "codigo_categoria": str(cat.get("codigo") or ""),
-                    "ativo": bool(cat.get("ativo", False))
+                    "categoria_financeira": "",
+                    "codigo_categoria": "",
+                    "ativo": False
                 })
-        else:
-            resultado.append({
-                "nivel_1": str(nivel_1 or ""),
-                "nivel_2": str(nivel_2 or ""),
-                "categoria_financeira": "",
-                "codigo_categoria": "",
-                "ativo": False
-            })
 
-        for sub in item.get("subitens") or []:
-            percorrer(sub, nivel_1, nivel_2)
+            subitens = item.get("subitens") or []
+
+            if isinstance(subitens, list):
+                for sub in subitens:
+                    if isinstance(sub, dict):
+                        percorrer(sub, nivel_1, nivel_2)
+
+        except Exception as e:
+            print("Erro flatten:", e)
 
     for item in data:
-        percorrer(item)
+        if isinstance(item, dict):
+            percorrer(item)
 
     return resultado
 
@@ -175,7 +185,7 @@ def flatten_dre(data):
 # =========================
 @app.get("/")
 def home():
-    return {"status": "API Conta Azul OK 🚀"}
+    return {"status": "API Conta Azul rodando 🚀"}
 
 
 @app.get("/categorias")
@@ -195,27 +205,47 @@ def contas_financeiras():
 
 @app.get("/categorias-dre")
 def categorias_dre():
-    token = get_access_token()
+    try:
+        token = get_access_token()
 
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers={"Authorization": f"Bearer {token}"}
-    )
+        response = requests.get(
+            f"{BASE_URL}/v1/financeiro/categorias-dre",
+            headers={"Authorization": f"Bearer {token}"}
+        )
 
-    if response.status_code != 200:
-        print(response.text)
+        if response.status_code != 200:
+            print(response.text)
+            return []
+
+        data = response.json()
+
+        # 🔥 GARANTE LISTA
+        if isinstance(data, dict):
+            data = data.get("itens", [])
+
+        if not isinstance(data, list):
+            return []
+
+        resultado = flatten_dre(data)
+
+        # 🔥 BLINDAGEM FINAL (POWER BI SAFE)
+        resultado_limpo = []
+
+        for item in resultado:
+            if isinstance(item, dict):
+                resultado_limpo.append({
+                    "nivel_1": str(item.get("nivel_1", "")),
+                    "nivel_2": str(item.get("nivel_2", "")),
+                    "categoria_financeira": str(item.get("categoria_financeira", "")),
+                    "codigo_categoria": str(item.get("codigo_categoria", "")),
+                    "ativo": bool(item.get("ativo", False))
+                })
+
+        return resultado_limpo
+
+    except Exception as e:
+        print("Erro categorias-dre:", str(e))
         return []
-
-    data = response.json()
-
-    # 🔥 GARANTE LISTA (NUNCA QUEBRA O BI)
-    if isinstance(data, dict):
-        data = data.get("itens", [])
-
-    if not isinstance(data, list):
-        return []
-
-    return flatten_dre(data)
 
 
 @app.get("/contas-receber")
