@@ -16,7 +16,7 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 
 # =========================
-# CONEXÃO BANCO
+# BANCO
 # =========================
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -51,7 +51,7 @@ def update_refresh_token(new_token):
 
 
 # =========================
-# TOKEN AUTOMÁTICO
+# TOKEN
 # =========================
 def get_access_token():
     refresh_token = get_refresh_token()
@@ -72,18 +72,17 @@ def get_access_token():
     )
 
     if response.status_code != 200:
-        raise Exception(f"Erro ao renovar token: {response.text}")
+        raise Exception(f"Erro token: {response.text}")
 
     data = response.json()
 
-    # 🔥 Atualiza SEMPRE o refresh_token
     update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
 
 
 # =========================
-# PAGINAÇÃO PADRÃO
+# PAGINAÇÃO
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
@@ -107,14 +106,14 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print("Erro API:", response.text)
+            print(response.text)
             break
 
         data = response.json()
 
         itens = data.get("items") or data.get("itens") or []
 
-        if not isinstance(itens, list) or len(itens) == 0:
+        if not itens:
             break
 
         resultado.extend(itens)
@@ -128,81 +127,57 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# FLATTEN DRE (POWER BI SAFE)
-# =========================
-def flatten_dre(data):
-    resultado = []
-
-    def percorrer(item, nivel_1=None, nivel_2=None):
-        try:
-            desc = item.get("descricao", "")
-
-            if not nivel_1:
-                nivel_1 = desc
-            elif not nivel_2:
-                nivel_2 = desc
-
-            categorias = item.get("categorias_financeiras") or []
-
-            if isinstance(categorias, list) and categorias:
-                for cat in categorias:
-                    if isinstance(cat, dict):
-                        resultado.append({
-                            "nivel_1": str(nivel_1 or ""),
-                            "nivel_2": str(nivel_2 or ""),
-                            "categoria_financeira": str(cat.get("nome") or ""),
-                            "codigo_categoria": str(cat.get("codigo") or ""),
-                            "ativo": bool(cat.get("ativo", False))
-                        })
-            else:
-                resultado.append({
-                    "nivel_1": str(nivel_1 or ""),
-                    "nivel_2": str(nivel_2 or ""),
-                    "categoria_financeira": "",
-                    "codigo_categoria": "",
-                    "ativo": False
-                })
-
-            subitens = item.get("subitens") or []
-
-            if isinstance(subitens, list):
-                for sub in subitens:
-                    if isinstance(sub, dict):
-                        percorrer(sub, nivel_1, nivel_2)
-
-        except Exception as e:
-            print("Erro flatten:", e)
-
-    for item in data:
-        if isinstance(item, dict):
-            percorrer(item)
-
-    return resultado
-
-
-# =========================
-# ENDPOINTS
+# ENDPOINTS PADRÃO
 # =========================
 @app.get("/")
 def home():
-    return {"status": "API Conta Azul rodando 🚀"}
+    return {"status": "API Conta Azul OK 🚀"}
 
 
 @app.get("/categorias")
 def categorias():
-    return get_all_pages("/v1/categorias")
+    return {"itens": get_all_pages("/v1/categorias")}
 
 
 @app.get("/centro-custo")
 def centro_custo():
-    return get_all_pages("/v1/centro-de-custo")
+    return {"itens": get_all_pages("/v1/centro-de-custo")}
 
 
 @app.get("/contas-financeiras")
 def contas_financeiras():
-    return get_all_pages("/v1/conta-financeira")
+    return {"itens": get_all_pages("/v1/conta-financeira")}
 
 
+@app.get("/contas-receber")
+def contas_receber():
+    return {
+        "itens": get_all_pages(
+            "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            {
+                "data_vencimento_de": "2000-01-01",
+                "data_vencimento_ate": "2100-01-01"
+            }
+        )
+    }
+
+
+@app.get("/contas-pagar")
+def contas_pagar():
+    return {
+        "itens": get_all_pages(
+            "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+            {
+                "data_vencimento_de": "2000-01-01",
+                "data_vencimento_ate": "2100-01-01"
+            }
+        )
+    }
+
+
+# =========================
+# CATEGORIAS DRE (FORMATO ORIGINAL)
+# =========================
 @app.get("/categorias-dre")
 def categorias_dre():
     try:
@@ -215,56 +190,23 @@ def categorias_dre():
 
         if response.status_code != 200:
             print(response.text)
-            return []
+            return {"itens": []}
 
         data = response.json()
 
-        # 🔥 GARANTE LISTA
+        # 🔥 GARANTE QUE RETORNA NO PADRÃO DO POWER BI
         if isinstance(data, dict):
-            data = data.get("itens", [])
+            itens = data.get("itens", [])
+        elif isinstance(data, list):
+            itens = data
+        else:
+            itens = []
 
-        if not isinstance(data, list):
-            return []
+        # 🔥 LIMPA QUALQUER SUJEIRA
+        itens_limpos = [i for i in itens if isinstance(i, dict)]
 
-        resultado = flatten_dre(data)
-
-        # 🔥 BLINDAGEM FINAL (POWER BI SAFE)
-        resultado_limpo = []
-
-        for item in resultado:
-            if isinstance(item, dict):
-                resultado_limpo.append({
-                    "nivel_1": str(item.get("nivel_1", "")),
-                    "nivel_2": str(item.get("nivel_2", "")),
-                    "categoria_financeira": str(item.get("categoria_financeira", "")),
-                    "codigo_categoria": str(item.get("codigo_categoria", "")),
-                    "ativo": bool(item.get("ativo", False))
-                })
-
-        return resultado_limpo
+        return {"itens": itens_limpos}
 
     except Exception as e:
         print("Erro categorias-dre:", str(e))
-        return []
-
-
-@app.get("/contas-receber")
-def contas_receber():
-    return get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        {
-            "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
-        }
-    )
-
-
-@app.get("/contas-pagar")
-def contas_pagar():
-    return get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        {
-            "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
-        }
-    )
+        return {"itens": []}
