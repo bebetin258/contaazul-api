@@ -18,7 +18,7 @@ if not BASE64 or not DATABASE_URL:
     raise Exception("Variáveis de ambiente não configuradas")
 
 # =========================
-# CONEXÃO BANCO (SUPABASE)
+# BANCO (SUPABASE)
 # =========================
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -35,12 +35,16 @@ def get_refresh_token():
     conn.close()
 
     if not result:
-        raise Exception("Refresh token não encontrado no banco")
+        raise Exception("❌ Refresh token não encontrado no banco")
+
+    print("🔑 TOKEN ATUAL:", result[0][:30], "...")
 
     return result[0]
 
 
 def update_refresh_token(new_token):
+    print("🔄 ATUALIZANDO REFRESH TOKEN...")
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -54,39 +58,51 @@ def update_refresh_token(new_token):
     cur.close()
     conn.close()
 
+    print("✅ TOKEN ATUALIZADO COM SUCESSO")
+
 
 # =========================
-# TOKEN AUTOMÁTICO
+# TOKEN AUTOMÁTICO (COM DEBUG)
 # =========================
 def get_access_token():
-    refresh_token = get_refresh_token()
+    try:
+        refresh_token = get_refresh_token()
 
-    response = requests.post(
-        TOKEN_URL,
-        headers={
-            "Authorization": f"Basic {BASE64}",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        }
-    )
+        response = requests.post(
+            TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {BASE64}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
+            }
+        )
 
-    if response.status_code != 200:
-        raise Exception(f"Erro ao renovar token: {response.text}")
+        print("📡 STATUS TOKEN:", response.status_code)
+        print("📡 RESPOSTA TOKEN:", response.text)
 
-    data = response.json()
+        if response.status_code != 200:
+            raise Exception(f"❌ ERRO TOKEN: {response.text}")
 
-    # 🔥 Sempre atualizar o refresh_token
-    if "refresh_token" in data:
-        update_refresh_token(data["refresh_token"])
+        data = response.json()
 
-    return data["access_token"]
+        # Atualiza refresh token SEMPRE
+        if "refresh_token" in data:
+            update_refresh_token(data["refresh_token"])
+
+        print("✅ ACCESS TOKEN GERADO")
+
+        return data["access_token"]
+
+    except Exception as e:
+        print("🔥 ERRO GERAL TOKEN:", str(e))
+        raise e
 
 
 # =========================
-# PAGINAÇÃO GENÉRICA
+# PAGINAÇÃO
 # =========================
 def get_all_pages(endpoint, extra_params=None):
     access_token = get_access_token()
@@ -103,6 +119,8 @@ def get_all_pages(endpoint, extra_params=None):
         if extra_params:
             params.update(extra_params)
 
+        print(f"📄 Página {pagina}")
+
         response = requests.get(
             f"{BASE_URL}{endpoint}",
             headers={
@@ -111,12 +129,17 @@ def get_all_pages(endpoint, extra_params=None):
             params=params
         )
 
+        print("📡 STATUS API:", response.status_code)
+
         if response.status_code != 200:
+            print("❌ ERRO API:", response.text)
             raise Exception(f"Erro API: {response.text}")
 
         data = response.json()
 
         itens = data.get("itens") or data.get("items") or []
+
+        print(f"📦 Registros na página: {len(itens)}")
 
         if not itens:
             break
@@ -128,6 +151,8 @@ def get_all_pages(endpoint, extra_params=None):
 
         pagina += 1
 
+    print(f"✅ TOTAL FINAL: {len(resultado_final)}")
+
     return resultado_final
 
 
@@ -137,10 +162,9 @@ def get_all_pages(endpoint, extra_params=None):
 
 @app.get("/")
 def home():
-    return {"status": "API Conta Azul rodando 🚀"}
+    return {"status": "API rodando 🚀"}
 
 
-# 📊 CATEGORIAS
 @app.get("/categorias")
 def categorias():
     try:
@@ -149,7 +173,6 @@ def categorias():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 📊 CENTRO DE CUSTO
 @app.get("/centro-custo")
 def centro_custo():
     try:
@@ -158,7 +181,6 @@ def centro_custo():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 📊 CATEGORIAS DRE
 @app.get("/categorias-dre")
 def categorias_dre():
     try:
@@ -169,12 +191,19 @@ def categorias_dre():
             headers={"Authorization": f"Bearer {access_token}"}
         )
 
-        return response.json()
+        print("📡 STATUS DRE:", response.status_code)
+
+        if response.status_code != 200:
+            raise Exception(response.text)
+
+        data = response.json()
+
+        return data.get("itens") or data.get("items") or data
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 📊 CONTAS FINANCEIRAS
 @app.get("/contas-financeiras")
 def contas_financeiras():
     try:
@@ -185,35 +214,41 @@ def contas_financeiras():
             headers={"Authorization": f"Bearer {access_token}"}
         )
 
-        return response.json()
+        print("📡 STATUS FINANCEIRAS:", response.status_code)
+
+        if response.status_code != 200:
+            raise Exception(response.text)
+
+        data = response.json()
+
+        return data.get("itens") or data.get("items") or data
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 💰 CONTAS A RECEBER (TODAS AS DATAS)
 @app.get("/contas-receber")
 def contas_receber():
     try:
         return get_all_pages(
             "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
             {
-                "data_vencimento_de": "2026-01-01",
-                "data_vencimento_ate": "2026-12-31"
+                "data_vencimento_de": "1900-01-01",
+                "data_vencimento_ate": "2100-12-31"
             }
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# 💸 CONTAS A PAGAR (TODAS AS DATAS)
 @app.get("/contas-pagar")
 def contas_pagar():
     try:
         return get_all_pages(
             "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
             {
-                "data_vencimento_de": "2026-01-01",
-                "data_vencimento_ate": "2026-12-31"
+                "data_vencimento_de": "1900-01-01",
+                "data_vencimento_ate": "2100-12-31"
             }
         )
     except Exception as e:
