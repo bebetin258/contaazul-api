@@ -106,7 +106,7 @@ def get_all_pages(endpoint, params_extra=None):
         )
 
         if response.status_code != 200:
-            print(response.text)
+            print("Erro API:", response.text)
             break
 
         data = response.json()
@@ -127,7 +127,7 @@ def get_all_pages(endpoint, params_extra=None):
 
 
 # =========================
-# LIMPEZA (POWER BI SAFE)
+# LIMPEZA LISTA
 # =========================
 def limpar_lista(lista):
     return [i for i in lista if isinstance(i, dict)]
@@ -141,27 +141,46 @@ def home():
     return {"status": "API Conta Azul OK 🚀"}
 
 
+# 🔥 CATEGORIAS → LISTA PURA (SEU M USA Table.FromList)
 @app.get("/categorias")
 def categorias():
     try:
         dados = get_all_pages("/v1/categorias")
-        dados_limpos = limpar_lista(dados)
-        return {"itens": dados_limpos}
+
+        resultado = []
+
+        for item in dados:
+            if isinstance(item, dict):
+                resultado.append({
+                    "id": str(item.get("id", "")),
+                    "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
+                    "nome": str(item.get("nome", "")),
+                    "categoria_pai": str(item.get("categoria_pai", "")),
+                    "tipo": str(item.get("tipo", "")),
+                    "entrada_dre": str(item.get("entrada_dre", "")),
+                    "considera_custo_dre": bool(item.get("considera_custo_dre", False))
+                })
+
+        return resultado  # 🔥 LISTA PURA
+
     except Exception as e:
         print("Erro categorias:", str(e))
-        return {"itens": []}
+        return []
 
 
+# 🔥 CENTRO DE CUSTO
 @app.get("/centro-custo")
 def centro_custo():
     return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
 
 
+# 🔥 CONTAS FINANCEIRAS
 @app.get("/contas-financeiras")
 def contas_financeiras():
     return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
 
 
+# 🔥 CONTAS RECEBER
 @app.get("/contas-receber")
 def contas_receber():
     return {
@@ -177,6 +196,7 @@ def contas_receber():
     }
 
 
+# 🔥 CONTAS PAGAR
 @app.get("/contas-pagar")
 def contas_pagar():
     return {
@@ -192,6 +212,7 @@ def contas_pagar():
     }
 
 
+# 🔥 CATEGORIAS DRE (FORMATO COM ITENS)
 @app.get("/categorias-dre")
 def categorias_dre():
     try:
