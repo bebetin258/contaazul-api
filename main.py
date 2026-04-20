@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import requests
 import os
 import psycopg2
@@ -11,9 +11,11 @@ app = FastAPI()
 BASE_URL = "https://api-v2.contaazul.com"
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
-BASE64 = os.getenv("BASE64_AUTH")  # client_id:client_secret em base64
+BASE64 = os.getenv("BASE64_AUTH")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+if not BASE64 or not DATABASE_URL:
+    raise Exception("Variáveis de ambiente não configuradas")
 
 # =========================
 # CONEXÃO BANCO
@@ -27,12 +29,15 @@ def get_refresh_token():
     cur = conn.cursor()
 
     cur.execute("SELECT refresh_token FROM tokens WHERE id = 1")
-    token = cur.fetchone()
+    result = cur.fetchone()
 
     cur.close()
     conn.close()
 
-    return token[0] if token else None
+    if not result:
+        raise Exception("Refresh token não encontrado no banco")
+
+    return result[0]
 
 
 def update_refresh_token(new_token):
@@ -56,9 +61,6 @@ def update_refresh_token(new_token):
 def get_access_token():
     refresh_token = get_refresh_token()
 
-    if not refresh_token:
-        raise Exception("Refresh token não encontrado no banco")
-
     response = requests.post(
         TOKEN_URL,
         headers={
@@ -76,8 +78,9 @@ def get_access_token():
 
     data = response.json()
 
-    # ⚠️ MUITO IMPORTANTE: sempre salvar o novo refresh_token
-    update_refresh_token(data["refresh_token"])
+    # 🔥 Atualiza SEMPRE o refresh_token
+    if "refresh_token" in data:
+        update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
 
@@ -110,7 +113,10 @@ def get_all_pages(endpoint):
 
         data = response.json()
 
-        itens = data.get("items", [])
+        # 🔥 Compatibilidade Conta Azul (itens OU items)
+        itens = data.get("itens") or data.get("items") or []
+
+        print(f"Página {pagina} trouxe {len(itens)} registros")
 
         if not itens:
             break
@@ -121,6 +127,8 @@ def get_all_pages(endpoint):
             break
 
         pagina += 1
+
+    print(f"Total final: {len(resultado_final)} registros")
 
     return resultado_final
 
@@ -135,24 +143,39 @@ def home():
 
 @app.get("/categorias")
 def categorias():
-    return get_all_pages("/v1/categorias")
+    try:
+        return get_all_pages("/v1/categorias")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/contas-financeiras")
 def contas_financeiras():
-    return get_all_pages("/v1/conta-financeira")
+    try:
+        return get_all_pages("/v1/conta-financeira")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/centro-custo")
 def centro_custo():
-    return get_all_pages("/v1/centro-custo")
+    try:
+        return get_all_pages("/v1/centro-custo")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/contas-pagar")
 def contas_pagar():
-    return get_all_pages("/v1/contas-pagar")
+    try:
+        return get_all_pages("/v1/contas-pagar")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/contas-receber")
 def contas_receber():
-    return get_all_pages("/v1/contas-receber")
+    try:
+        return get_all_pages("/v1/contas-receber")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
