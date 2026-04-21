@@ -72,7 +72,7 @@ def get_access_token():
 
 
 # =========================
-# PAGINAÇÃO
+# PAGINAÇÃO GENÉRICA
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
@@ -81,7 +81,10 @@ def get_all_pages(endpoint, params_extra=None):
     resultado = []
 
     while True:
-        params = {"pagina": pagina, "tamanho_pagina": 100}
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": 100
+        }
 
         if params_extra:
             params.update(params_extra)
@@ -135,33 +138,28 @@ def home():
     return {"status": "API Conta Azul OK 🚀"}
 
 
-# 🔹 CATEGORIAS → LISTA PURA
+# 🔹 CATEGORIAS
 @app.get("/categorias")
 def categorias():
-    try:
-        dados = get_all_pages("/v1/categorias")
+    dados = get_all_pages("/v1/categorias")
 
-        resultado = []
-        for item in dados:
-            if isinstance(item, dict):
-                resultado.append({
-                    "id": str(item.get("id", "")),
-                    "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
-                    "nome": str(item.get("nome", "")),
-                    "categoria_pai": str(item.get("categoria_pai", "")),
-                    "tipo": str(item.get("tipo", "")),
-                    "entrada_dre": str(item.get("entrada_dre", "")),
-                    "considera_custo_dre": bool(item.get("considera_custo_dre", False))
-                })
+    resultado = []
+    for item in dados:
+        if isinstance(item, dict):
+            resultado.append({
+                "id": str(item.get("id", "")),
+                "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
+                "nome": str(item.get("nome", "")),
+                "categoria_pai": str(item.get("categoria_pai", "")),
+                "tipo": str(item.get("tipo", "")),
+                "entrada_dre": str(item.get("entrada_dre", "")),
+                "considera_custo_dre": bool(item.get("considera_custo_dre", False))
+            })
 
-        return resultado
-
-    except Exception as e:
-        print("Erro categorias:", str(e))
-        return []
+    return resultado
 
 
-# 🔹 CONTAS RECEBER → LISTA PURA
+# 🔹 CONTAS RECEBER
 @app.get("/contas-receber")
 def contas_receber():
     dados = get_all_pages(
@@ -174,7 +172,7 @@ def contas_receber():
     return limpar_lista(dados)
 
 
-# 🔹 CONTAS PAGAR → LISTA PURA
+# 🔹 CONTAS PAGAR
 @app.get("/contas-pagar")
 def contas_pagar():
     dados = get_all_pages(
@@ -187,62 +185,101 @@ def contas_pagar():
     return limpar_lista(dados)
 
 
-# 🔹 VENDAS → LISTA PURA
+# 🔥 VENDAS COMPLETO (COM TOTAIS)
 @app.get("/vendas")
 def vendas(data_inicio: str = "2000-01-01", data_fim: str = "2100-01-01"):
     try:
-        dados = get_all_pages(
-            "/v1/venda/busca",
-            {
-                "data_inicio": data_inicio,
-                "data_fim": data_fim
-            }
-        )
-        return limpar_lista(dados)
+        token = get_access_token()
+
+        pagina = 1
+        todas_vendas = []
+        totais = {}
+        quantidades = {}
+        total_itens = 0
+
+        while True:
+            response = requests.get(
+                f"{BASE_URL}/v1/venda/busca",
+                headers={"Authorization": f"Bearer {token}"},
+                params={
+                    "pagina": pagina,
+                    "tamanho_pagina": 100,
+                    "data_inicio": data_inicio,
+                    "data_fim": data_fim
+                }
+            )
+
+            if response.status_code != 200:
+                print(response.text)
+                break
+
+            data = response.json()
+
+            # 🔥 pega totais só da primeira página
+            if pagina == 1:
+                totais = data.get("totais", {})
+                quantidades = data.get("quantidades", {})
+                total_itens = data.get("total_itens", 0)
+
+            itens = data.get("itens", [])
+
+            if not itens:
+                break
+
+            todas_vendas.extend(itens)
+
+            if len(itens) < 100:
+                break
+
+            pagina += 1
+
+        return {
+            "totais": totais,
+            "quantidades": quantidades,
+            "total_itens": total_itens,
+            "itens": limpar_lista(todas_vendas)
+        }
 
     except Exception as e:
         print("Erro vendas:", str(e))
-        return []
+        return {
+            "totais": {},
+            "quantidades": {},
+            "total_itens": 0,
+            "itens": []
+        }
 
 
-# 🔹 CENTRO DE CUSTO → COM "itens"
+# 🔹 CENTRO DE CUSTO
 @app.get("/centro-custo")
 def centro_custo():
     return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
 
 
-# 🔹 CONTAS FINANCEIRAS → COM "itens"
+# 🔹 CONTAS FINANCEIRAS
 @app.get("/contas-financeiras")
 def contas_financeiras():
     return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
 
 
-# 🔹 CATEGORIAS DRE → COM "itens"
+# 🔹 CATEGORIAS DRE
 @app.get("/categorias-dre")
 def categorias_dre():
-    try:
-        token = get_access_token()
+    token = get_access_token()
 
-        response = requests.get(
-            f"{BASE_URL}/v1/financeiro/categorias-dre",
-            headers={"Authorization": f"Bearer {token}"}
-        )
+    response = requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers={"Authorization": f"Bearer {token}"}
+    )
 
-        if response.status_code != 200:
-            print(response.text)
-            return {"itens": []}
-
-        data = response.json()
-
-        if isinstance(data, dict):
-            itens = data.get("itens", [])
-        elif isinstance(data, list):
-            itens = data
-        else:
-            itens = []
-
-        return {"itens": limpar_lista(itens)}
-
-    except Exception as e:
-        print("Erro categorias-dre:", str(e))
+    if response.status_code != 200:
         return {"itens": []}
+
+    data = response.json()
+
+    if isinstance(data, dict):
+        itens = data.get("itens", [])
+    else:
+        itens = data
+
+    return {"itens": limpar_lista(itens)}
