@@ -72,7 +72,7 @@ def get_access_token():
 
 
 # =========================
-# PAGINAÇÃO GENÉRICA
+# PAGINAÇÃO
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
@@ -119,14 +119,7 @@ def get_all_pages(endpoint, params_extra=None):
 # LIMPEZA
 # =========================
 def limpar_lista(lista):
-    resultado = []
-    for item in lista:
-        if isinstance(item, dict):
-            resultado.append({
-                k: ("" if v is None else v)
-                for k, v in item.items()
-            })
-    return resultado
+    return [{k: ("" if v is None else v) for k, v in item.items()} for item in lista if isinstance(item, dict)]
 
 
 # =========================
@@ -138,148 +131,45 @@ def home():
     return {"status": "API Conta Azul OK 🚀"}
 
 
-# 🔹 CATEGORIAS
-@app.get("/categorias")
-def categorias():
-    dados = get_all_pages("/v1/categorias")
+# 🔥 NOVO ENDPOINT COMPLETO COM DATA DE PAGAMENTO
+@app.get("/contas-pagar-detalhado")
+def contas_pagar_detalhado():
+    dados = get_all_pages(
+        "/v1/financeiro/contas-a-pagar",
+        {
+            "data_vencimento_de": "2000-01-01",
+            "data_vencimento_ate": "2100-01-01"
+        }
+    )
 
     resultado = []
-    for item in dados:
-        if isinstance(item, dict):
-            resultado.append({
-                "id": str(item.get("id", "")),
-                "versao": int(item.get("versao", 0)) if item.get("versao") else 0,
-                "nome": str(item.get("nome", "")),
-                "categoria_pai": str(item.get("categoria_pai", "")),
-                "tipo": str(item.get("tipo", "")),
-                "entrada_dre": str(item.get("entrada_dre", "")),
-                "considera_custo_dre": bool(item.get("considera_custo_dre", False))
-            })
+
+    for conta in dados:
+        parcelas = conta.get("parcelas", [])
+
+        for parcela in parcelas:
+            baixas = parcela.get("baixas", [])
+
+            if not baixas:
+                resultado.append({
+                    "id_conta": conta.get("id"),
+                    "descricao": conta.get("descricao"),
+                    "fornecedor": conta.get("fornecedor", {}).get("nome"),
+                    "data_vencimento": parcela.get("data_vencimento"),
+                    "valor": parcela.get("valor"),
+                    "data_pagamento": None,
+                    "valor_pago": 0
+                })
+
+            for baixa in baixas:
+                resultado.append({
+                    "id_conta": conta.get("id"),
+                    "descricao": conta.get("descricao"),
+                    "fornecedor": conta.get("fornecedor", {}).get("nome"),
+                    "data_vencimento": parcela.get("data_vencimento"),
+                    "valor": parcela.get("valor"),
+                    "data_pagamento": baixa.get("data_baixa"),
+                    "valor_pago": baixa.get("valor")
+                })
 
     return resultado
-
-
-# 🔹 CONTAS RECEBER
-@app.get("/contas-receber")
-def contas_receber():
-    dados = get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        {
-            "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
-        }
-    )
-    return limpar_lista(dados)
-
-
-# 🔹 CONTAS PAGAR
-@app.get("/contas-pagar")
-def contas_pagar():
-    dados = get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        {
-            "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-01-01"
-        }
-    )
-    return limpar_lista(dados)
-
-
-# 🔥 VENDAS COMPLETO (COM TOTAIS)
-@app.get("/vendas")
-def vendas(data_inicio: str = "2000-01-01", data_fim: str = "2100-01-01"):
-    try:
-        token = get_access_token()
-
-        pagina = 1
-        todas_vendas = []
-        totais = {}
-        quantidades = {}
-        total_itens = 0
-
-        while True:
-            response = requests.get(
-                f"{BASE_URL}/v1/venda/busca",
-                headers={"Authorization": f"Bearer {token}"},
-                params={
-                    "pagina": pagina,
-                    "tamanho_pagina": 100,
-                    "data_inicio": data_inicio,
-                    "data_fim": data_fim
-                }
-            )
-
-            if response.status_code != 200:
-                print(response.text)
-                break
-
-            data = response.json()
-
-            # 🔥 pega totais só da primeira página
-            if pagina == 1:
-                totais = data.get("totais", {})
-                quantidades = data.get("quantidades", {})
-                total_itens = data.get("total_itens", 0)
-
-            itens = data.get("itens", [])
-
-            if not itens:
-                break
-
-            todas_vendas.extend(itens)
-
-            if len(itens) < 100:
-                break
-
-            pagina += 1
-
-        return {
-            "totais": totais,
-            "quantidades": quantidades,
-            "total_itens": total_itens,
-            "itens": limpar_lista(todas_vendas)
-        }
-
-    except Exception as e:
-        print("Erro vendas:", str(e))
-        return {
-            "totais": {},
-            "quantidades": {},
-            "total_itens": 0,
-            "itens": []
-        }
-
-
-# 🔹 CENTRO DE CUSTO
-@app.get("/centro-custo")
-def centro_custo():
-    return {"itens": limpar_lista(get_all_pages("/v1/centro-de-custo"))}
-
-
-# 🔹 CONTAS FINANCEIRAS
-@app.get("/contas-financeiras")
-def contas_financeiras():
-    return {"itens": limpar_lista(get_all_pages("/v1/conta-financeira"))}
-
-
-# 🔹 CATEGORIAS DRE
-@app.get("/categorias-dre")
-def categorias_dre():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-
-    if response.status_code != 200:
-        return {"itens": []}
-
-    data = response.json()
-
-    if isinstance(data, dict):
-        itens = data.get("itens", [])
-    else:
-        itens = data
-
-    return {"itens": limpar_lista(itens)}
