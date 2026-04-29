@@ -13,14 +13,15 @@ git add .
 
 echo.
 echo 💾 Criando commit...
-git commit -m "update automatico %date% %time%"
+git commit -m "update automatico %date% %time%" || echo ⚠️ Nada para commit
 
 echo.
 echo ⬆️ Enviando para GitHub...
-git push origin main
+git push origin main || echo ❌ ERRO NO PUSH
 
 echo.
 echo =============================
-echo ✅ DEPLOY FINALIZADO
+echo ✅ PROCESSO FINALIZADO
 echo =============================
+
 pause
