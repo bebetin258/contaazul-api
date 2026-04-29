@@ -5,8 +5,8 @@ import psycopg2
 
 app = FastAPI()
 
-# 🔥 VERSÃO (controle de deploy)
-VERSION = "v3.0 - CONTAS PAGAR DEFINITIVO"
+# 🔥 VERSIONAMENTO
+VERSION = "v5.0 - CONTAS RECEBER/PAGAR ESTAVEL"
 print(f"🚀 SUBIU NOVA VERSÃO: {VERSION}")
 
 # =========================
@@ -37,7 +37,7 @@ def get_refresh_token():
     conn.close()
 
     if not token:
-        raise Exception("❌ Refresh token não encontrado")
+        raise Exception("Refresh token não encontrado")
 
     return token[0]
 
@@ -62,8 +62,6 @@ def update_refresh_token(new_token):
 # TOKEN
 # =========================
 def get_access_token():
-    print("🔐 Renovando token...")
-
     refresh_token = get_refresh_token()
 
     response = requests.post(
@@ -81,18 +79,15 @@ def get_access_token():
     data = response.json()
 
     if response.status_code != 200:
-        print("❌ ERRO TOKEN:", data)
-        raise Exception(data)
+        raise Exception(f"Erro ao gerar token: {data}")
 
     update_refresh_token(data["refresh_token"])
-
-    print("✅ Token OK")
 
     return data["access_token"]
 
 
 # =========================
-# ENDPOINT HOME
+# HOME
 # =========================
 @app.get("/")
 def home():
@@ -103,12 +98,10 @@ def home():
 
 
 # =========================
-# CONTAS A PAGAR (OFICIAL)
+# CONTAS A RECEBER
 # =========================
-@app.get("/contas-pagar")
-def contas_pagar():
-
-    print("📊 Iniciando coleta contas a pagar...")
+@app.get("/contas-receber")
+def contas_receber():
 
     token = get_access_token()
 
@@ -116,13 +109,10 @@ def contas_pagar():
     resultado = []
 
     while True:
-        print(f"➡️ Página {pagina}")
 
         response = requests.get(
-            f"{BASE_URL}/v1/financeiro/contas-a-pagar",
-            headers={
-                "Authorization": f"Bearer {token}"
-            },
+            f"{BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            headers={"Authorization": f"Bearer {token}"},
             params={
                 "pagina": pagina,
                 "tamanho_pagina": 100,
@@ -132,7 +122,6 @@ def contas_pagar():
         )
 
         if response.status_code != 200:
-            print("❌ ERRO CONTA AZUL:", response.text)
             break
 
         data = response.json()
@@ -141,40 +130,96 @@ def contas_pagar():
         if not itens:
             break
 
-        # 🔥 flatten para BI
-        for conta in itens:
-
-            baixas = conta.get("baixas", [])
-
-            # NÃO PAGO
-            if not baixas:
-                resultado.append({
-                    "id": conta.get("id"),
-                    "descricao": conta.get("descricao"),
-                    "status": conta.get("status"),
-                    "data_vencimento": conta.get("data_vencimento"),
-                    "data_pagamento": None,
-                    "valor": conta.get("valor_liquido_total"),
-                    "valor_pago": 0
-                })
-
-            # PAGO
-            for baixa in baixas:
-                resultado.append({
-                    "id": conta.get("id"),
-                    "descricao": conta.get("descricao"),
-                    "status": conta.get("status"),
-                    "data_vencimento": conta.get("data_vencimento"),
-                    "data_pagamento": baixa.get("data_baixa"),
-                    "valor": conta.get("valor_liquido_total"),
-                    "valor_pago": baixa.get("composicao_valor", {}).get("valor_liquido")
-                })
+        resultado.extend(itens)
 
         if len(itens) < 100:
             break
 
         pagina += 1
 
-    print(f"✅ Total registros: {len(resultado)}")
+    return resultado
+
+
+# =========================
+# CONTAS A PAGAR
+# =========================
+@app.get("/contas-pagar")
+def contas_pagar():
+
+    token = get_access_token()
+
+    pagina = 1
+    resultado = []
+
+    while True:
+
+        response = requests.get(
+            f"{BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+            headers={"Authorization": f"Bearer {token}"},
+            params={
+                "pagina": pagina,
+                "tamanho_pagina": 100,
+                "data_vencimento_de": "2023-01-01",
+                "data_vencimento_ate": "2100-01-01"
+            }
+        )
+
+        if response.status_code != 200:
+            break
+
+        data = response.json()
+        itens = data.get("itens", [])
+
+        if not itens:
+            break
+
+        resultado.extend(itens)
+
+        if len(itens) < 100:
+            break
+
+        pagina += 1
 
     return resultado
+
+
+# =========================
+# OUTROS ENDPOINTS
+# =========================
+
+@app.get("/categorias")
+def categorias():
+    token = get_access_token()
+    return requests.get(
+        f"{BASE_URL}/v1/categorias",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"pagina": 1, "tamanho_pagina": 100}
+    ).json()
+
+
+@app.get("/centro-custo")
+def centro_custo():
+    token = get_access_token()
+    return requests.get(
+        f"{BASE_URL}/v1/centro-de-custo",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"pagina": 1, "tamanho_pagina": 100}
+    ).json()
+
+
+@app.get("/contas-financeiras")
+def contas_financeiras():
+    token = get_access_token()
+    return requests.get(
+        f"{BASE_URL}/v1/conta-financeira",
+        headers={"Authorization": f"Bearer {token}"}
+    ).json()
+
+
+@app.get("/categorias-dre")
+def categorias_dre():
+    token = get_access_token()
+    return requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers={"Authorization": f"Bearer {token}"}
+    ).json()
