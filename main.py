@@ -5,6 +5,7 @@ import psycopg2
 
 app = FastAPI()
 
+print("🔥 NOVA VERSÃO SUBIU")
 # =========================
 # CONFIG (CORRIGIDO)
 # =========================
