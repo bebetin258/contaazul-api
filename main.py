@@ -2,12 +2,11 @@ from fastapi import FastAPI
 import requests
 import os
 import psycopg2
-from datetime import datetime
 
 app = FastAPI()
 
-# 🔥 IDENTIFICAÇÃO DA VERSÃO (MUDE SEMPRE)
-VERSION = "v2.0 - FIX FINAL API CONTA AZUL"
+# 🔥 VERSÃO (controle de deploy)
+VERSION = "v3.0 - CONTAS PAGAR DEFINITIVO"
 print(f"🚀 SUBIU NOVA VERSÃO: {VERSION}")
 
 # =========================
@@ -56,14 +55,14 @@ def update_refresh_token(new_token):
     cur.close()
     conn.close()
 
-    print("🔄 Refresh token atualizado no banco")
+    print("🔄 Refresh token atualizado")
 
 
 # =========================
 # TOKEN
 # =========================
 def get_access_token():
-    print("🔐 Buscando access token...")
+    print("🔐 Renovando token...")
 
     refresh_token = get_refresh_token()
 
@@ -87,15 +86,14 @@ def get_access_token():
 
     update_refresh_token(data["refresh_token"])
 
-    print("✅ Token renovado com sucesso")
+    print("✅ Token OK")
 
     return data["access_token"]
 
 
 # =========================
-# ENDPOINTS
+# ENDPOINT HOME
 # =========================
-
 @app.get("/")
 def home():
     return {
@@ -104,10 +102,13 @@ def home():
     }
 
 
-@app.get("/contas-pagar-detalhado")
-def contas_pagar_detalhado():
+# =========================
+# CONTAS A PAGAR (OFICIAL)
+# =========================
+@app.get("/contas-pagar")
+def contas_pagar():
 
-    print("📊 Endpoint contas-pagar chamado")
+    print("📊 Iniciando coleta contas a pagar...")
 
     token = get_access_token()
 
@@ -119,11 +120,13 @@ def contas_pagar_detalhado():
 
         response = requests.get(
             f"{BASE_URL}/v1/financeiro/contas-a-pagar",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}"
+            },
             params={
                 "pagina": pagina,
                 "tamanho_pagina": 100,
-                "data_vencimento_de": "2000-01-01",
+                "data_vencimento_de": "2023-01-01",
                 "data_vencimento_ate": "2100-01-01"
             }
         )
@@ -138,9 +141,12 @@ def contas_pagar_detalhado():
         if not itens:
             break
 
+        # 🔥 flatten para BI
         for conta in itens:
+
             baixas = conta.get("baixas", [])
 
+            # NÃO PAGO
             if not baixas:
                 resultado.append({
                     "id": conta.get("id"),
@@ -152,6 +158,7 @@ def contas_pagar_detalhado():
                     "valor_pago": 0
                 })
 
+            # PAGO
             for baixa in baixas:
                 resultado.append({
                     "id": conta.get("id"),
