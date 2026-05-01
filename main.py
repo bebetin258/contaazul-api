@@ -3,10 +3,11 @@ import requests
 import os
 import psycopg2
 import time
+import threading
 
 app = FastAPI()
 
-VERSION = "v12.0 - LIMPO COM CACHE TOKEN"
+VERSION = "v13.0 - TOKEN ESTAVEL FINAL"
 print(f"🚀 SUBIU: {VERSION}")
 
 BASE_URL = "https://api-v2.contaazul.com"
@@ -15,10 +16,11 @@ TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 BASE64 = os.getenv("BASE64_AUTH")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# =========================
+# CACHE + LOCK (CRÍTICO)
+# =========================
+token_lock = threading.Lock()
 
-# =========================
-# CACHE TOKEN (CRÍTICO)
-# =========================
 access_token_cache = {
     "token": None,
     "expires_at": 0
@@ -42,6 +44,9 @@ def get_refresh_token():
     cur.close()
     conn.close()
 
+    if not row:
+        raise Exception("Refresh token não encontrado")
+
     return row[0]
 
 
@@ -60,40 +65,45 @@ def update_refresh_token(new_token):
 
 
 # =========================
-# TOKEN (CORRIGIDO)
+# TOKEN (BLINDADO)
 # =========================
 def get_access_token():
-    now = time.time()
+    with token_lock:
 
-    if access_token_cache["token"] and now < access_token_cache["expires_at"]:
+        now = time.time()
+
+        # ✔ usa cache se ainda válido
+        if access_token_cache["token"] and now < access_token_cache["expires_at"]:
+            return access_token_cache["token"]
+
+        refresh_token = get_refresh_token()
+
+        response = requests.post(
+            TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {BASE64}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
+            }
+        )
+
+        data = response.json()
+
+        if response.status_code != 200:
+            print("❌ ERRO TOKEN:", data)
+            raise Exception(data)
+
+        # 🔥 atualiza refresh token
+        update_refresh_token(data["refresh_token"])
+
+        # 🔥 atualiza cache
+        access_token_cache["token"] = data["access_token"]
+        access_token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
+
         return access_token_cache["token"]
-
-    refresh_token = get_refresh_token()
-
-    response = requests.post(
-        TOKEN_URL,
-        headers={
-            "Authorization": f"Basic {BASE64}",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        }
-    )
-
-    data = response.json()
-
-    if response.status_code != 200:
-        print("❌ ERRO TOKEN:", data)
-        raise Exception(data)
-
-    update_refresh_token(data["refresh_token"])
-
-    access_token_cache["token"] = data["access_token"]
-    access_token_cache["expires_at"] = now + data.get("expires_in", 3600) - 60
-
-    return access_token_cache["token"]
 
 
 # =========================
@@ -143,7 +153,6 @@ def home():
     return {"status": "ok", "version": VERSION}
 
 
-# 🔹 CONTAS A PAGAR
 @app.get("/contas-pagar")
 def contas_pagar():
     return buscar_todos(
@@ -156,7 +165,6 @@ def contas_pagar():
     )
 
 
-# 🔹 CONTAS A RECEBER
 @app.get("/contas-receber")
 def contas_receber():
     return buscar_todos(
@@ -169,7 +177,7 @@ def contas_receber():
     )
 
 
-# 🔹 BAIXA (INDIVIDUAL)
+# 🔥 BAIXA INDIVIDUAL (SEPARADO)
 @app.get("/baixa/{parcela_id}")
 def baixa(parcela_id: str):
     token = get_access_token()
@@ -182,7 +190,6 @@ def baixa(parcela_id: str):
     return response.json()
 
 
-# 🔹 CONTAS FINANCEIRAS
 @app.get("/contas-financeiras")
 def contas_financeiras():
     token = get_access_token()
@@ -193,7 +200,6 @@ def contas_financeiras():
     ).json()
 
 
-# 🔹 CATEGORIAS DRE
 @app.get("/categorias-dre")
 def categorias_dre():
     token = get_access_token()
@@ -204,7 +210,6 @@ def categorias_dre():
     ).json()
 
 
-# 🔹 CATEGORIAS
 @app.get("/categorias")
 def categorias():
     token = get_access_token()
