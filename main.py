@@ -5,7 +5,7 @@ import psycopg2
 
 app = FastAPI()
 
-VERSION = "v9.0 - PADRAO LISTA POWER BI"
+VERSION = "v11.0 - BAIXAS CORRIGIDAS"
 print(f"🚀 SUBIU: {VERSION}")
 
 BASE_URL = "https://api-v2.contaazul.com"
@@ -32,7 +32,7 @@ def get_refresh_token():
     cur.close()
     conn.close()
 
-    return row[0] if row else None
+    return row[0]
 
 
 def update_refresh_token(new_token):
@@ -70,7 +70,6 @@ def get_access_token():
     data = response.json()
 
     if response.status_code != 200:
-        print("❌ ERRO TOKEN:", data)
         raise Exception(data)
 
     update_refresh_token(data["refresh_token"])
@@ -79,14 +78,30 @@ def get_access_token():
 
 
 # =========================
-# PADRONIZA RETORNO LISTA
+# CACHE DE BAIXAS
 # =========================
-def extrair_lista(response_json):
-    if isinstance(response_json, list):
-        return response_json
-    if isinstance(response_json, dict):
-        return response_json.get("itens", [])
-    return []
+cache_baixas = {}
+
+
+def buscar_baixa(parcela_id, token):
+    if not parcela_id:
+        return None
+
+    if parcela_id in cache_baixas:
+        return cache_baixas[parcela_id]
+
+    response = requests.get(
+        f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    if response.status_code != 200:
+        return None
+
+    data = response.json()
+    cache_baixas[parcela_id] = data
+
+    return data
 
 
 # =========================
@@ -108,37 +123,41 @@ def buscar_todos(endpoint, params):
         )
 
         if response.status_code != 200:
-            print("❌ ERRO API:", response.text)
+            print("Erro API:", response.text)
             break
 
-        lista = extrair_lista(response.json())
+        data = response.json()
+        itens = data.get("itens", [])
 
-        if not lista:
+        if not itens:
             break
 
-        resultado.extend(lista)
+        resultado.extend(itens)
 
-        if len(lista) < params.get("tamanho_pagina", 100):
+        if len(itens) < params.get("tamanho_pagina", 100):
             break
 
         pagina += 1
 
-    return resultado
+    return resultado, token
 
 
 # =========================
-# GARANTE DATA PAGAMENTO
+# ENRIQUECER COM BAIXAS
 # =========================
-def tratar_pagamento(itens):
+def adicionar_baixas(itens, token):
     for item in itens:
-        data_pagamento = None
 
-        baixas = item.get("baixas", [])
+        parcela_id = item.get("id")
 
-        if isinstance(baixas, list) and len(baixas) > 0:
-            data_pagamento = baixas[0].get("data_baixa")
+        baixa = buscar_baixa(parcela_id, token)
 
-        item["data_pagamento"] = data_pagamento
+        if baixa:
+            item["data_pagamento"] = baixa.get("data_pagamento")
+            item["metodo_pagamento"] = baixa.get("metodo_pagamento")
+        else:
+            item["data_pagamento"] = None
+            item["metodo_pagamento"] = None
 
     return itens
 
@@ -152,71 +171,9 @@ def home():
     return {"status": "ok", "version": VERSION}
 
 
-@app.get("/categorias")
-def categorias():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/categorias",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-
-    return extrair_lista(response.json())
-
-
-@app.get("/categorias-dre")
-def categorias_dre():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-
-    return extrair_lista(response.json())
-
-
-@app.get("/contas-financeiras")
-def contas_financeiras():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/conta-financeira",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-
-    return extrair_lista(response.json())
-
-
-@app.get("/saldo-inicial")
-def saldo_inicial():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/eventos-financeiros/saldo-inicial",
-        headers={"Authorization": f"Bearer {token}"}
-    )
-
-    return extrair_lista(response.json())
-
-
-@app.get("/contas-receber")
-def contas_receber():
-    dados = buscar_todos(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        {
-            "tamanho_pagina": 100,
-            "data_vencimento_de": "2023-01-01",
-            "data_vencimento_ate": "2100-01-01"
-        }
-    )
-
-    return tratar_pagamento(dados)
-
-
 @app.get("/contas-pagar")
 def contas_pagar():
-    dados = buscar_todos(
+    dados, token = buscar_todos(
         "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
         {
             "tamanho_pagina": 100,
@@ -225,4 +182,48 @@ def contas_pagar():
         }
     )
 
-    return tratar_pagamento(dados)
+    return adicionar_baixas(dados, token)
+
+
+@app.get("/contas-receber")
+def contas_receber():
+    dados, token = buscar_todos(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        {
+            "tamanho_pagina": 100,
+            "data_vencimento_de": "2023-01-01",
+            "data_vencimento_ate": "2100-01-01"
+        }
+    )
+
+    return adicionar_baixas(dados, token)
+
+
+@app.get("/contas-financeiras")
+def contas_financeiras():
+    token = get_access_token()
+
+    return requests.get(
+        f"{BASE_URL}/v1/conta-financeira",
+        headers={"Authorization": f"Bearer {token}"}
+    ).json()
+
+
+@app.get("/categorias-dre")
+def categorias_dre():
+    token = get_access_token()
+
+    return requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers={"Authorization": f"Bearer {token}"}
+    ).json()
+
+
+@app.get("/categorias")
+def categorias():
+    token = get_access_token()
+
+    return requests.get(
+        f"{BASE_URL}/v1/categorias",
+        headers={"Authorization": f"Bearer {token}"}
+    ).json()
