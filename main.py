@@ -65,19 +65,17 @@ def get_access_token():
     )
 
     if response.status_code != 200:
-        print("❌ ERRO TOKEN:", response.text)
-        raise Exception("Erro ao gerar token")
+        raise Exception(response.text)
 
     data = response.json()
 
-    # salva novo refresh token
     update_refresh_token(data["refresh_token"])
 
     return data["access_token"]
 
 
 # =========================
-# FUNÇÃO PADRÃO PAGINAÇÃO
+# PAGINAÇÃO GENÉRICA
 # =========================
 def get_all_pages(endpoint):
     token = get_access_token()
@@ -88,11 +86,9 @@ def get_all_pages(endpoint):
 
     pagina = 1
     tamanho_pagina = 100
-    todos_itens = []
+    todos = []
 
     while True:
-        print(f"📄 {endpoint} - Página {pagina}")
-
         response = requests.get(
             f"{BASE_URL}{endpoint}",
             headers=headers,
@@ -103,7 +99,6 @@ def get_all_pages(endpoint):
         )
 
         if response.status_code != 200:
-            print("❌ ERRO API:", response.text)
             return {"erro": response.text}
 
         data = response.json()
@@ -112,18 +107,16 @@ def get_all_pages(endpoint):
         if not itens:
             break
 
-        todos_itens.extend(itens)
+        todos.extend(itens)
 
         if len(itens) < tamanho_pagina:
             break
 
         pagina += 1
 
-    print(f"✅ Total registros: {len(todos_itens)}")
-
     return {
-        "itens_totais": len(todos_itens),
-        "itens": todos_itens
+        "itens_totais": len(todos),
+        "itens": todos
     }
 
 
