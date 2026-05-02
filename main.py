@@ -3,7 +3,6 @@ import requests
 import os
 import psycopg2
 import time
-import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -27,6 +26,8 @@ def get_connection():
 # TOKEN
 # =========================
 def get_access_token():
+    print("🔑 Gerando access token...")
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -56,6 +57,8 @@ def get_access_token():
     cur.close()
     conn.close()
 
+    print("✅ Token atualizado")
+
     return data["access_token"]
 
 # =========================
@@ -69,6 +72,8 @@ def get_all(endpoint):
     todos = []
 
     while True:
+        print(f"📄 Página {pagina} - {endpoint}")
+
         r = requests.get(
             f"{BASE_URL}{endpoint}",
             headers=headers,
@@ -81,6 +86,7 @@ def get_all(endpoint):
         )
 
         if r.status_code != 200:
+            print("❌ Erro na API:", r.text)
             break
 
         data = r.json()
@@ -95,7 +101,7 @@ def get_all(endpoint):
     return todos
 
 # =========================
-# BAIXA
+# BAIXAS
 # =========================
 def get_baixa(id_parcela, headers):
     try:
@@ -103,9 +109,12 @@ def get_baixa(id_parcela, headers):
             f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
             headers=headers
         )
+
         if r.status_code != 200:
             return None
+
         return r.json()
+
     except:
         return None
 
@@ -113,14 +122,17 @@ def get_baixa(id_parcela, headers):
 # ETL
 # =========================
 def executar_etl():
-    print("🚀 Iniciando ETL...")
+    print("\n🚀 INICIANDO ETL\n")
 
     try:
         token = get_access_token()
         headers = {"Authorization": f"Bearer {token}"}
 
         receber = get_all("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
+        print(f"📥 RECEBER: {len(receber)}")
+
         pagar = get_all("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
+        print(f"📤 PAGAR: {len(pagar)}")
 
         todos = []
 
@@ -132,8 +144,10 @@ def executar_etl():
             x["tipo"] = "PAGAR"
             todos.append(x)
 
-        # 🔥 buscar baixas
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        print(f"📊 TOTAL: {len(todos)}")
+
+        # BAIXAS
+        with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {
                 executor.submit(get_baixa, item["id"], headers): item
                 for item in todos
@@ -145,12 +159,10 @@ def executar_etl():
 
                 if baixa:
                     item["data_pagamento"] = baixa.get("data_pagamento")
-                    item["metodo_pagamento"] = baixa.get("metodo_pagamento")
                 else:
                     item["data_pagamento"] = None
-                    item["metodo_pagamento"] = None
 
-        # salvar no banco
+        # SALVAR
         conn = get_connection()
         cur = conn.cursor()
 
@@ -158,36 +170,23 @@ def executar_etl():
 
         for item in todos:
             cur.execute("""
-                INSERT INTO fato_financeiro (
-                    id, tipo, descricao, total,
-                    data_vencimento, data_competencia,
-                    data_pagamento, metodo_pagamento,
-                    cliente, fornecedor, categoria
-                )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                INSERT INTO fato_financeiro (id, tipo, descricao, data_pagamento)
+                VALUES (%s,%s,%s,%s)
             """, (
                 item.get("id"),
                 item.get("tipo"),
                 item.get("descricao"),
-                item.get("total"),
-                item.get("data_vencimento"),
-                item.get("data_competencia"),
-                item.get("data_pagamento"),
-                item.get("metodo_pagamento"),
-                (item.get("cliente") or {}).get("nome") if item.get("cliente") else None,
-                (item.get("fornecedor") or {}).get("nome") if item.get("fornecedor") else None,
-                (item.get("categorias")[0]["nome"] if item.get("categorias") else None)
+                item.get("data_pagamento")
             ))
 
         conn.commit()
         cur.close()
         conn.close()
 
-        print(f"✅ ETL finalizado: {len(todos)} registros")
+        print(f"\n✅ ETL FINALIZADO: {len(todos)} registros\n")
 
     except Exception as e:
-        print("❌ ERRO NO ETL:", str(e))
-
+        print("\n❌ ERRO NO ETL:", str(e), "\n")
 
 # =========================
 # LOOP AUTOMÁTICO
@@ -197,15 +196,37 @@ def loop_etl():
         executar_etl()
         time.sleep(INTERVALO_ETL)
 
-
 @app.on_event("startup")
-def start_background_etl():
+def start_etl():
+    print("🔥 STARTUP: executando ETL inicial")
+
+    executar_etl()
+
     thread = threading.Thread(target=loop_etl, daemon=True)
     thread.start()
 
 # =========================
-# ENDPOINT POWER BI
+# ENDPOINTS
 # =========================
+
+@app.get("/etl")
+def rodar_etl_manual():
+    executar_etl()
+    return {"status": "ETL executado"}
+
+@app.get("/status")
+def status():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM fato_financeiro")
+    total = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return {"linhas": total}
+
 @app.get("/financeiro")
 def financeiro():
     conn = get_connection()
@@ -223,24 +244,39 @@ def financeiro():
     return {"itens": itens}
 
 # =========================
-# STATUS
+# ENDPOINTS AUXILIARES
 # =========================
-@app.get("/status")
-def status():
-    conn = get_connection()
-    cur = conn.cursor()
 
-    cur.execute("SELECT COUNT(*) FROM fato_financeiro")
-    total = cur.fetchone()[0]
+@app.get("/categorias")
+def categorias():
+    token = get_access_token()
+    r = requests.get(
+        f"{BASE_URL}/v1/categorias",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    return r.json()
 
-    cur.close()
-    conn.close()
+@app.get("/categorias-dre")
+def categorias_dre():
+    token = get_access_token()
+    r = requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    return r.json()
 
-    return {"linhas": total}
+@app.get("/conta-financeira")
+def conta_financeira():
+    token = get_access_token()
+    r = requests.get(
+        f"{BASE_URL}/v1/conta-financeira",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    return r.json()
 
 # =========================
 # HEALTHCHECK
 # =========================
 @app.get("/")
 def home():
-    return {"status": "API rodando + ETL automático"}
+    return {"status": "API rodando com ETL automático"}
