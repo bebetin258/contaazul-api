@@ -157,10 +157,10 @@ def executar_etl():
                 item = futures[future]
                 baixa = future.result()
 
-                if baixa:
-                    item["data_pagamento"] = baixa.get("data_pagamento")
-                else:
-                    item["data_pagamento"] = None
+if isinstance(baixa, dict):
+    item["data_pagamento"] = baixa.get("data_pagamento")
+else:
+    item["data_pagamento"] = None
 
         # SALVAR
         conn = get_connection()
