@@ -30,7 +30,7 @@ def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
 # =========================
-# TOKEN
+# TOKEN BLINDADO
 # =========================
 def get_access_token():
     now = time.time()
@@ -132,7 +132,7 @@ def get_all_pages(endpoint, params_extra=None):
 
 @app.get("/")
 def home():
-    return {"status": "API OK - PAGINACAO REAL + BAIXAS"}
+    return {"status": "API OK - FINAL ESTAVEL"}
 
 
 @app.get("/categorias")
@@ -180,7 +180,7 @@ def contas_pagar():
 
 
 # =========================
-# 🔥 ENDPOINT BAIXAS
+# 🔥 BAIXAS (CORRIGIDO)
 # =========================
 @app.get("/baixas")
 def baixas():
@@ -216,8 +216,18 @@ def baixas():
             headers=headers
         )
 
-        if response.status_code == 200:
-            data = response.json()
+        if response.status_code != 200:
+            continue
+
+        data = response.json()
+
+        # 🔥 TRATAMENTO CORRETO
+        if isinstance(data, list):
+            for item in data:
+                item["id_origem"] = id_parcela
+                resultado.append(item)
+
+        elif isinstance(data, dict):
             data["id_origem"] = id_parcela
             resultado.append(data)
 
