@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import requests
 import os
 import psycopg2
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -16,18 +17,6 @@ TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 BASE64_AUTH = os.getenv("BASE64_AUTH")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-MAX_WORKERS = 8
-TIMEOUT = 10
-RETRY = 3
-
-# =========================
-# CACHE TOKEN
-# =========================
-ACCESS_TOKEN_CACHE = {
-    "token": None,
-    "expires_at": 0
-}
-
 # =========================
 # DB
 # =========================
@@ -35,62 +24,45 @@ def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
 # =========================
-# TOKEN SEGURO
+# TOKEN
 # =========================
 def get_access_token():
-    now = time.time()
-
-    if ACCESS_TOKEN_CACHE["token"] and now < ACCESS_TOKEN_CACHE["expires_at"]:
-        return ACCESS_TOKEN_CACHE["token"]
-
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("SELECT refresh_token FROM tokens LIMIT 1 FOR UPDATE")
+    cur.execute("SELECT refresh_token FROM tokens LIMIT 1")
     refresh_token = cur.fetchone()[0]
 
-    try:
-        response = requests.post(
-            TOKEN_URL,
-            headers={
-                "Authorization": f"Basic {BASE64_AUTH}",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token
-            },
-            timeout=TIMEOUT
-        )
+    response = requests.post(
+        TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {BASE64_AUTH}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        }
+    )
 
-        if response.status_code != 200:
-            conn.rollback()
-            raise Exception("Erro ao renovar token")
+    data = response.json()
 
-        data = response.json()
+    cur.execute(
+        "UPDATE tokens SET refresh_token = %s",
+        (data["refresh_token"],)
+    )
 
-        cur.execute(
-            "UPDATE tokens SET refresh_token = %s",
-            (data["refresh_token"],)
-        )
+    conn.commit()
+    cur.close()
+    conn.close()
 
-        conn.commit()
-
-        ACCESS_TOKEN_CACHE["token"] = data["access_token"]
-        ACCESS_TOKEN_CACHE["expires_at"] = now + 3500
-
-        return data["access_token"]
-
-    finally:
-        cur.close()
-        conn.close()
+    return data["access_token"]
 
 # =========================
-# PAGINAÇÃO SEGURA
+# PAGINAÇÃO
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
-
     headers = {"Authorization": f"Bearer {token}"}
 
     pagina = 1
@@ -104,88 +76,77 @@ def get_all_pages(endpoint, params_extra=None):
             **(params_extra or {})
         }
 
-        try:
-            r = requests.get(
-                f"{BASE_URL}{endpoint}",
-                headers=headers,
-                params=params,
-                timeout=TIMEOUT
-            )
+        r = requests.get(
+            f"{BASE_URL}{endpoint}",
+            headers=headers,
+            params=params
+        )
 
-            if r.status_code != 200:
-                break
-
-            data = r.json()
-            itens = data.get("itens", [])
-
-            if not itens:
-                break
-
-            todos.extend(itens)
-
-            if len(itens) < tamanho_pagina:
-                break
-
-            pagina += 1
-
-        except:
+        if r.status_code != 200:
             break
+
+        data = r.json()
+        itens = data.get("itens", [])
+
+        if not itens:
+            break
+
+        todos.extend(itens)
+
+        if len(itens) < tamanho_pagina:
+            break
+
+        pagina += 1
 
     return todos
 
 # =========================
-# PADRONIZAÇÃO (CRÍTICO)
-# =========================
-def padronizar_item(item):
-    return {
-        "id": item.get("id"),
-        "status": item.get("status"),
-        "total": item.get("total"),
-        "descricao": item.get("descricao"),
-        "data_vencimento": item.get("data_vencimento"),
-        "data_competencia": item.get("data_competencia"),
-        "data_criacao": item.get("data_criacao"),
-        "data_alteracao": item.get("data_alteracao"),
-        "categorias": item.get("categorias", []),
-        "centros_de_custo": item.get("centros_de_custo", []),
-        "cliente": item.get("cliente"),
-        "fornecedor": item.get("fornecedor"),
-        "data_pagamento": None,
-        "metodo_pagamento": None
-    }
-
-# =========================
-# BAIXA COM RETRY
+# BAIXA
 # =========================
 def buscar_baixa(id_parcela, headers):
-    for _ in range(RETRY):
-        try:
-            r = requests.get(
-                f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
-                headers=headers,
-                timeout=TIMEOUT
-            )
+    try:
+        r = requests.get(
+            f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
+            headers=headers
+        )
 
-            if r.status_code != 200:
-                continue
+        if r.status_code != 200:
+            return None
 
-            data = r.json()
+        data = r.json()
 
-            if isinstance(data, list):
-                return data[0] if data else None
+        if isinstance(data, list):
+            return data[0] if data else None
 
-            return data
+        return data
 
-        except:
-            time.sleep(1)
-
-    return None
+    except:
+        return None
 
 # =========================
-# ENDPOINT FINAL
+# SALVAR CACHE
 # =========================
-@app.get("/financeiro-completo")
-def financeiro_completo():
+def salvar_cache(itens):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM financeiro_cache")
+
+    for item in itens:
+        cur.execute(
+            "INSERT INTO financeiro_cache (id, data) VALUES (%s, %s)",
+            (item["id"], json.dumps(item))
+        )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# =========================
+# PROCESSAMENTO PESADO
+# =========================
+@app.get("/atualizar-cache")
+def atualizar_cache():
 
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
@@ -206,10 +167,10 @@ def financeiro_completo():
         }
     )
 
-    todos = [padronizar_item(x) for x in (receber + pagar)]
+    todos = receber + pagar
 
-    # 🔥 THREAD POOL CONTROLADO
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    # 🔥 BUSCA BAIXAS
+    with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
             executor.submit(buscar_baixa, item["id"], headers): item
             for item in todos
@@ -222,10 +183,36 @@ def financeiro_completo():
             if baixa:
                 item["data_pagamento"] = baixa.get("data_pagamento")
                 item["metodo_pagamento"] = baixa.get("metodo_pagamento")
+            else:
+                item["data_pagamento"] = None
+                item["metodo_pagamento"] = None
 
-    return {"itens": todos}
+    salvar_cache(todos)
 
+    return {"status": "cache atualizado", "total": len(todos)}
 
+# =========================
+# ENDPOINT LEVE (POWER BI)
+# =========================
+@app.get("/financeiro")
+def financeiro():
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT data FROM financeiro_cache")
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    itens = [r[0] for r in rows]
+
+    return {"itens": itens}
+
+# =========================
+# HEALTHCHECK
+# =========================
 @app.get("/")
 def home():
-    return {"status": "API ENTERPRISE OK"}
+    return {"status": "OK"}
