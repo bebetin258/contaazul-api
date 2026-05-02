@@ -16,6 +16,10 @@ TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 BASE64_AUTH = os.getenv("BASE64_AUTH")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+MAX_WORKERS = 8
+TIMEOUT = 10
+RETRY = 3
+
 # =========================
 # CACHE TOKEN
 # =========================
@@ -24,11 +28,14 @@ ACCESS_TOKEN_CACHE = {
     "expires_at": 0
 }
 
+# =========================
+# DB
+# =========================
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
 # =========================
-# TOKEN AUTOMÁTICO
+# TOKEN SEGURO
 # =========================
 def get_access_token():
     now = time.time()
@@ -42,33 +49,44 @@ def get_access_token():
     cur.execute("SELECT refresh_token FROM tokens LIMIT 1 FOR UPDATE")
     refresh_token = cur.fetchone()[0]
 
-    response = requests.post(
-        TOKEN_URL,
-        headers={
-            "Authorization": f"Basic {BASE64_AUTH}",
-            "Content-Type": "application/x-www-form-urlencoded"
-        },
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        }
-    )
+    try:
+        response = requests.post(
+            TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {BASE64_AUTH}",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
+            },
+            timeout=TIMEOUT
+        )
 
-    data = response.json()
+        if response.status_code != 200:
+            conn.rollback()
+            raise Exception("Erro ao renovar token")
 
-    cur.execute("UPDATE tokens SET refresh_token = %s", (data["refresh_token"],))
-    conn.commit()
+        data = response.json()
 
-    cur.close()
-    conn.close()
+        cur.execute(
+            "UPDATE tokens SET refresh_token = %s",
+            (data["refresh_token"],)
+        )
 
-    ACCESS_TOKEN_CACHE["token"] = data["access_token"]
-    ACCESS_TOKEN_CACHE["expires_at"] = now + 3500
+        conn.commit()
 
-    return data["access_token"]
+        ACCESS_TOKEN_CACHE["token"] = data["access_token"]
+        ACCESS_TOKEN_CACHE["expires_at"] = now + 3500
+
+        return data["access_token"]
+
+    finally:
+        cur.close()
+        conn.close()
 
 # =========================
-# PAGINAÇÃO
+# PAGINAÇÃO SEGURA
 # =========================
 def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
@@ -86,52 +104,85 @@ def get_all_pages(endpoint, params_extra=None):
             **(params_extra or {})
         }
 
-        r = requests.get(f"{BASE_URL}{endpoint}", headers=headers, params=params)
+        try:
+            r = requests.get(
+                f"{BASE_URL}{endpoint}",
+                headers=headers,
+                params=params,
+                timeout=TIMEOUT
+            )
 
-        if r.status_code != 200:
+            if r.status_code != 200:
+                break
+
+            data = r.json()
+            itens = data.get("itens", [])
+
+            if not itens:
+                break
+
+            todos.extend(itens)
+
+            if len(itens) < tamanho_pagina:
+                break
+
+            pagina += 1
+
+        except:
             break
-
-        data = r.json()
-        itens = data.get("itens", [])
-
-        if not itens:
-            break
-
-        todos.extend(itens)
-
-        if len(itens) < tamanho_pagina:
-            break
-
-        pagina += 1
 
     return todos
 
 # =========================
-# 🔥 BAIXAS EM PARALELO
+# PADRONIZAÇÃO (CRÍTICO)
+# =========================
+def padronizar_item(item):
+    return {
+        "id": item.get("id"),
+        "status": item.get("status"),
+        "total": item.get("total"),
+        "descricao": item.get("descricao"),
+        "data_vencimento": item.get("data_vencimento"),
+        "data_competencia": item.get("data_competencia"),
+        "data_criacao": item.get("data_criacao"),
+        "data_alteracao": item.get("data_alteracao"),
+        "categorias": item.get("categorias", []),
+        "centros_de_custo": item.get("centros_de_custo", []),
+        "cliente": item.get("cliente"),
+        "fornecedor": item.get("fornecedor"),
+        "data_pagamento": None,
+        "metodo_pagamento": None
+    }
+
+# =========================
+# BAIXA COM RETRY
 # =========================
 def buscar_baixa(id_parcela, headers):
-    try:
-        r = requests.get(
-            f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
-            headers=headers,
-            timeout=10
-        )
+    for _ in range(RETRY):
+        try:
+            r = requests.get(
+                f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
+                headers=headers,
+                timeout=TIMEOUT
+            )
 
-        if r.status_code != 200:
-            return None
+            if r.status_code != 200:
+                continue
 
-        data = r.json()
+            data = r.json()
 
-        if isinstance(data, list):
-            return data[0] if data else None
+            if isinstance(data, list):
+                return data[0] if data else None
 
-        return data
+            return data
 
-    except:
-        return None
+        except:
+            time.sleep(1)
+
+    return None
 
 # =========================
-# 🚀 ENDPOINT FINAL CONSOLIDADO
+# ENDPOINT FINAL
 # =========================
 @app.get("/financeiro-completo")
 def financeiro_completo():
@@ -155,10 +206,10 @@ def financeiro_completo():
         }
     )
 
-    todos = receber + pagar
+    todos = [padronizar_item(x) for x in (receber + pagar)]
 
-    # 🔥 THREAD POOL (RÁPIDO)
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # 🔥 THREAD POOL CONTROLADO
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
             executor.submit(buscar_baixa, item["id"], headers): item
             for item in todos
@@ -173,3 +224,8 @@ def financeiro_completo():
                 item["metodo_pagamento"] = baixa.get("metodo_pagamento")
 
     return {"itens": todos}
+
+
+@app.get("/")
+def home():
+    return {"status": "API ENTERPRISE OK"}
