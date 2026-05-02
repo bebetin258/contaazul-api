@@ -29,21 +29,18 @@ ACCESS_TOKEN_CACHE = {
 def get_connection():
     return psycopg2.connect(DATABASE_URL)
 
-
 # =========================
-# TOKEN BLINDADO
+# TOKEN
 # =========================
 def get_access_token():
     now = time.time()
 
-    # ✅ CACHE (evita refresh toda hora)
     if ACCESS_TOKEN_CACHE["token"] and now < ACCESS_TOKEN_CACHE["expires_at"]:
         return ACCESS_TOKEN_CACHE["token"]
 
     conn = get_connection()
     cur = conn.cursor()
 
-    # 🔒 LOCK → evita concorrência
     cur.execute("SELECT refresh_token FROM tokens LIMIT 1 FOR UPDATE")
     refresh_token = cur.fetchone()[0]
 
@@ -60,43 +57,23 @@ def get_access_token():
             }
         )
 
-        # 🔁 RETRY automático
-        if response.status_code != 200:
-            print("⚠️ Retry token...")
-            response = requests.post(
-                TOKEN_URL,
-                headers={
-                    "Authorization": f"Basic {BASE64_AUTH}",
-                    "Content-Type": "application/x-www-form-urlencoded"
-                },
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token
-                }
-            )
-
         if response.status_code != 200:
             conn.rollback()
-            raise Exception(f"Erro token: {response.text}")
+            raise Exception(response.text)
 
         data = response.json()
 
-        new_refresh = data["refresh_token"]
-        access_token = data["access_token"]
-
-        # 💾 salva novo refresh token
         cur.execute(
             "UPDATE tokens SET refresh_token = %s",
-            (new_refresh,)
+            (data["refresh_token"],)
         )
 
         conn.commit()
 
-        # 🧠 cache access token
-        ACCESS_TOKEN_CACHE["token"] = access_token
+        ACCESS_TOKEN_CACHE["token"] = data["access_token"]
         ACCESS_TOKEN_CACHE["expires_at"] = now + 3500
 
-        return access_token
+        return data["access_token"]
 
     finally:
         cur.close()
@@ -104,9 +81,9 @@ def get_access_token():
 
 
 # =========================
-# PAGINAÇÃO
+# PAGINAÇÃO REAL
 # =========================
-def get_all_pages(endpoint):
+def get_all_pages(endpoint, params_extra=None):
     token = get_access_token()
 
     headers = {
@@ -118,13 +95,16 @@ def get_all_pages(endpoint):
     todos = []
 
     while True:
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": tamanho_pagina,
+            **(params_extra or {})
+        }
+
         response = requests.get(
             f"{BASE_URL}{endpoint}",
             headers=headers,
-            params={
-                "pagina": pagina,
-                "tamanho_pagina": tamanho_pagina
-            }
+            params=params
         )
 
         if response.status_code != 200:
@@ -143,10 +123,7 @@ def get_all_pages(endpoint):
 
         pagina += 1
 
-    return {
-        "itens_totais": len(todos),
-        "itens": todos
-    }
+    return {"itens": todos}
 
 
 # =========================
@@ -155,7 +132,7 @@ def get_all_pages(endpoint):
 
 @app.get("/")
 def home():
-    return {"status": "API OK - v4 BLINDADA"}
+    return {"status": "API OK - PAGINACAO REAL + BAIXAS"}
 
 
 @app.get("/categorias")
@@ -180,33 +157,68 @@ def categorias_dre():
     return response.json()
 
 
-@app.get("/contas-pagar")
-def contas_pagar():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        headers={"Authorization": f"Bearer {token}"},
-        params={
-            "data_vencimento_de": "2023-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
-    )
-
-    return response.json()
-
-
 @app.get("/contas-receber")
 def contas_receber():
-    token = get_access_token()
-
-    response = requests.get(
-        f"{BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        headers={"Authorization": f"Bearer {token}"},
-        params={
+    return get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        {
             "data_vencimento_de": "2023-01-01",
             "data_vencimento_ate": "2035-12-31"
         }
     )
 
-    return response.json()
+
+@app.get("/contas-pagar")
+def contas_pagar():
+    return get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+        {
+            "data_vencimento_de": "2023-01-01",
+            "data_vencimento_ate": "2035-12-31"
+        }
+    )
+
+
+# =========================
+# 🔥 ENDPOINT BAIXAS
+# =========================
+@app.get("/baixas")
+def baixas():
+    token = get_access_token()
+
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
+
+    receber = get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        {
+            "data_vencimento_de": "2023-01-01",
+            "data_vencimento_ate": "2035-12-31"
+        }
+    )["itens"]
+
+    pagar = get_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+        {
+            "data_vencimento_de": "2023-01-01",
+            "data_vencimento_ate": "2035-12-31"
+        }
+    )["itens"]
+
+    ids = [x["id"] for x in receber + pagar]
+
+    resultado = []
+
+    for id_parcela in ids:
+        response = requests.get(
+            f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
+            headers=headers
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            data["id_origem"] = id_parcela
+            resultado.append(data)
+
+    return {"itens": resultado}
