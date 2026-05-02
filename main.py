@@ -2,15 +2,11 @@ from fastapi import FastAPI
 import requests
 import os
 import psycopg2
-import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = FastAPI()
 
-# =========================
-# CONFIG
-# =========================
 BASE_URL = "https://api-v2.contaazul.com"
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
@@ -61,29 +57,24 @@ def get_access_token():
 # =========================
 # PAGINAÇÃO
 # =========================
-def get_all_pages(endpoint, params_extra=None):
+def get_all(endpoint):
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
 
     pagina = 1
-    tamanho_pagina = 100
     todos = []
 
     while True:
-        params = {
-            "pagina": pagina,
-            "tamanho_pagina": tamanho_pagina,
-            **(params_extra or {})
-        }
-
         r = requests.get(
             f"{BASE_URL}{endpoint}",
             headers=headers,
-            params=params
+            params={
+                "pagina": pagina,
+                "tamanho_pagina": 100,
+                "data_vencimento_de": "2023-01-01",
+                "data_vencimento_ate": "2035-12-31"
+            }
         )
-
-        if r.status_code != 200:
-            break
 
         data = r.json()
         itens = data.get("itens", [])
@@ -92,10 +83,6 @@ def get_all_pages(endpoint, params_extra=None):
             break
 
         todos.extend(itens)
-
-        if len(itens) < tamanho_pagina:
-            break
-
         pagina += 1
 
     return todos
@@ -103,76 +90,44 @@ def get_all_pages(endpoint, params_extra=None):
 # =========================
 # BAIXA
 # =========================
-def buscar_baixa(id_parcela, headers):
+def get_baixa(id_parcela, headers):
     try:
         r = requests.get(
             f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{id_parcela}/baixa",
             headers=headers
         )
-
         if r.status_code != 200:
             return None
-
-        data = r.json()
-
-        if isinstance(data, list):
-            return data[0] if data else None
-
-        return data
-
+        return r.json()
     except:
         return None
 
 # =========================
-# SALVAR CACHE
+# ETL PRINCIPAL
 # =========================
-def salvar_cache(itens):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM financeiro_cache")
-
-    for item in itens:
-        cur.execute(
-            "INSERT INTO financeiro_cache (id, data) VALUES (%s, %s)",
-            (item["id"], json.dumps(item))
-        )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# =========================
-# PROCESSAMENTO PESADO
-# =========================
-@app.get("/atualizar-cache")
-def atualizar_cache():
+@app.get("/etl")
+def executar_etl():
 
     token = get_access_token()
     headers = {"Authorization": f"Bearer {token}"}
 
-    receber = get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        {
-            "data_vencimento_de": "2023-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
-    )
+    receber = get_all("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
+    pagar = get_all("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
 
-    pagar = get_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        {
-            "data_vencimento_de": "2023-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
-    )
+    todos = []
 
-    todos = receber + pagar
+    for x in receber:
+        x["tipo"] = "RECEBER"
+        todos.append(x)
 
-    # 🔥 BUSCA BAIXAS
+    for x in pagar:
+        x["tipo"] = "PAGAR"
+        todos.append(x)
+
+    # 🔥 buscar baixas
     with ThreadPoolExecutor(max_workers=6) as executor:
         futures = {
-            executor.submit(buscar_baixa, item["id"], headers): item
+            executor.submit(get_baixa, item["id"], headers): item
             for item in todos
         }
 
@@ -183,36 +138,60 @@ def atualizar_cache():
             if baixa:
                 item["data_pagamento"] = baixa.get("data_pagamento")
                 item["metodo_pagamento"] = baixa.get("metodo_pagamento")
-            else:
-                item["data_pagamento"] = None
-                item["metodo_pagamento"] = None
 
-    salvar_cache(todos)
-
-    return {"status": "cache atualizado", "total": len(todos)}
-
-# =========================
-# ENDPOINT LEVE (POWER BI)
-# =========================
-@app.get("/financeiro")
-def financeiro():
-
+    # =========================
+    # SALVAR NO BANCO
+    # =========================
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("SELECT data FROM financeiro_cache")
+    cur.execute("DELETE FROM fato_financeiro")
+
+    for item in todos:
+        cur.execute("""
+            INSERT INTO fato_financeiro (
+                id, tipo, descricao, total,
+                data_vencimento, data_competencia,
+                data_pagamento, metodo_pagamento,
+                cliente, fornecedor, categoria
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            item.get("id"),
+            item.get("tipo"),
+            item.get("descricao"),
+            item.get("total"),
+            item.get("data_vencimento"),
+            item.get("data_competencia"),
+            item.get("data_pagamento"),
+            item.get("metodo_pagamento"),
+            (item.get("cliente") or {}).get("nome") if item.get("cliente") else None,
+            (item.get("fornecedor") or {}).get("nome") if item.get("fornecedor") else None,
+            (item.get("categorias")[0]["nome"] if item.get("categorias") else None)
+        ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "ETL concluído", "linhas": len(todos)}
+
+# =========================
+# API PARA POWER BI
+# =========================
+@app.get("/financeiro")
+def financeiro():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT * FROM fato_financeiro")
+    colnames = [desc[0] for desc in cur.description]
+
     rows = cur.fetchall()
 
     cur.close()
     conn.close()
 
-    itens = [r[0] for r in rows]
+    itens = [dict(zip(colnames, row)) for row in rows]
 
     return {"itens": itens}
-
-# =========================
-# HEALTHCHECK
-# =========================
-@app.get("/")
-def home():
-    return {"status": "OK"}
