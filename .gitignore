@@ -1,12 +1,4 @@
-# Ignorar Power BI
-*.pbix
-
-# Python
+.env
 __pycache__/
 *.pyc
-
-# Ambiente
-.env
-
-# Logs
-*.log
+*.pbix

@@ -1,8 +1,7 @@
 import requests
 import time
 import os
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
 
 # =========================
 # CONFIG
@@ -20,7 +19,7 @@ RETRY = 3
 # DB CONNECTION
 # =========================
 def get_connection():
-    return psycopg2.connect(DATABASE_URL)
+    return psycopg.connect(DATABASE_URL)
 
 
 # =========================
@@ -28,7 +27,7 @@ def get_connection():
 # =========================
 def get_refresh_token():
     conn = get_connection()
-    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur = conn.cursor()
 
     cur.execute("SELECT refresh_token FROM tokens WHERE id = 1;")
     result = cur.fetchone()
@@ -39,7 +38,7 @@ def get_refresh_token():
     if not result:
         raise Exception("❌ Nenhum refresh_token encontrado no banco")
 
-    return result["refresh_token"]
+    return result[0]
 
 
 def update_refresh_token(new_token):
@@ -53,6 +52,7 @@ def update_refresh_token(new_token):
     """, (new_token,))
 
     conn.commit()
+
     cur.close()
     conn.close()
 
@@ -102,7 +102,7 @@ def refresh_access_token():
             print(f"Erro ao atualizar token (tentativa {attempt+1}): {e}")
             time.sleep(2)
 
-    raise Exception("❌ Falha ao renovar token após múltiplas tentativas")
+    raise Exception("❌ Falha ao renovar token")
 
 
 # =========================
@@ -133,10 +133,7 @@ def make_request(url, headers, params):
                 timeout=TIMEOUT
             )
 
-            if response.status_code == 200:
-                return response
-
-            if response.status_code == 401:
+            if response.status_code in [200, 401]:
                 return response
 
             raise Exception(response.text)
@@ -145,7 +142,7 @@ def make_request(url, headers, params):
             print(f"Erro request (tentativa {attempt+1}): {e}")
             time.sleep(2)
 
-    raise Exception("❌ Falha na requisição após múltiplas tentativas")
+    raise Exception("❌ Falha na requisição")
 
 
 # =========================
@@ -185,7 +182,6 @@ def fetch_all_pages(endpoint, token, params=None):
         page_data = extract_list(data)
 
         if not page_data:
-            print("📭 Sem mais dados")
             break
 
         all_data.extend(page_data)
@@ -217,8 +213,6 @@ def run():
         "contas_pagar": "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
     }
 
-    resultados = {}
-
     for nome, endpoint in endpoints.items():
         print(f"\n📊 Buscando: {nome}")
 
@@ -232,12 +226,9 @@ def run():
 
         data = fetch_all_pages(endpoint, token, params)
 
-        resultados[nome] = data
         print(f"✔ Total {nome}: {len(data)}")
 
     print("\n✅ Execução finalizada com sucesso")
-
-    return resultados
 
 
 # =========================
