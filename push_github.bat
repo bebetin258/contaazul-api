@@ -24,7 +24,7 @@ echo ================================
 
 git branch -M main
 
-git remote add origin https://https://github.com/bebetin258/contaazul-api.git
+git remote add origin https://github.com/bebetin258/contaazul-api.git
 
 echo ================================
 echo Enviando para o GitHub...
