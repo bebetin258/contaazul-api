@@ -13,9 +13,6 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 
 BASE_URL = "https://api-v2.contaazul.com"
 
-TIMEOUT = 30
-RETRY = 3
-
 
 # =========================
 # DB CONNECTION
@@ -60,50 +57,41 @@ def update_refresh_token(new_token):
 
 
 # =========================
-# TOKEN REFRESH (CORRETO)
+# TOKEN REFRESH (SEM RETRY)
 # =========================
 def refresh_access_token():
     refresh_token = get_refresh_token()
 
     url = f"{BASE_URL}/oauth2/token"
 
-    for attempt in range(RETRY):
-        try:
-            response = requests.post(
-                url,
-                auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
-                headers={
-                    "Accept": "application/json"
-                },
-                data={
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token
-                },
-                timeout=TIMEOUT
-            )
+    response = requests.post(
+        url,
+        auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
+        headers={"Accept": "application/json"},
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token
+        },
+        timeout=30
+    )
 
-            print(f"🔄 Tentativa {attempt+1} - Status: {response.status_code}")
-            print("📨 Resposta:", response.text)
+    print("STATUS:", response.status_code)
+    print("RESPONSE:", response.text)
 
-            if response.status_code != 200:
-                raise Exception(response.text)
+    if response.status_code != 200:
+        raise Exception(f"❌ Falha ao renovar token: {response.text}")
 
-            data = response.json()
+    data = response.json()
 
-            new_access_token = data["access_token"]
-            new_refresh_token = data["refresh_token"]
+    new_access_token = data["access_token"]
+    new_refresh_token = data["refresh_token"]
 
-            update_refresh_token(new_refresh_token)
+    # 🔥 CRÍTICO: salva imediatamente o novo refresh_token
+    update_refresh_token(new_refresh_token)
 
-            print("🔐 Token atualizado com sucesso")
+    print("🔐 Token atualizado com sucesso")
 
-            return new_access_token
-
-        except Exception as e:
-            print(f"❌ Erro ao atualizar token: {e}")
-            time.sleep(2)
-
-    raise Exception("❌ Falha ao renovar token")
+    return new_access_token
 
 
 # =========================
@@ -119,31 +107,6 @@ def extract_list(data):
                 return v
 
     return []
-
-
-# =========================
-# REQUEST COM RETRY
-# =========================
-def make_request(url, headers, params):
-    for attempt in range(RETRY):
-        try:
-            response = requests.get(
-                url,
-                headers=headers,
-                params=params,
-                timeout=TIMEOUT
-            )
-
-            if response.status_code in [200, 401]:
-                return response
-
-            raise Exception(response.text)
-
-        except Exception as e:
-            print(f"❌ Erro request (tentativa {attempt+1}): {e}")
-            time.sleep(2)
-
-    raise Exception("❌ Falha na requisição")
 
 
 # =========================
@@ -168,16 +131,29 @@ def fetch_all_pages(endpoint, token, params=None):
             "Accept": "application/json"
         }
 
-        response = make_request(
+        response = requests.get(
             f"{BASE_URL}{endpoint}",
-            headers,
-            params
+            headers=headers,
+            params=params,
+            timeout=30
         )
 
+        # 🔄 Se token expirar, renova UMA vez
         if response.status_code == 401:
             print("🔄 Token expirado, renovando...")
             token = refresh_access_token()
-            continue
+
+            headers["Authorization"] = f"Bearer {token}"
+
+            response = requests.get(
+                f"{BASE_URL}{endpoint}",
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+
+        if response.status_code != 200:
+            raise Exception(f"Erro API: {response.text}")
 
         data = response.json()
         page_data = extract_list(data)
@@ -204,6 +180,7 @@ def fetch_all_pages(endpoint, token, params=None):
 def run():
     print("🚀 Iniciando execução...")
 
+    # 🔥 Gera access_token inicial corretamente
     token = refresh_access_token()
 
     endpoints = {
