@@ -2,11 +2,13 @@ import requests
 import time
 import os
 import psycopg
+from requests.auth import HTTPBasicAuth
 
 # =========================
 # CONFIG
 # =========================
-BASE64_AUTH = os.getenv("BASE64_AUTH")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 BASE_URL = "https://api-v2.contaazul.com"
@@ -63,21 +65,18 @@ def update_refresh_token(new_token):
 def refresh_access_token():
     refresh_token = get_refresh_token()
 
-    url = "https://api-v2.contaazul.com/oauth2/token"
+    url = f"{BASE_URL}/oauth2/token"
 
-    headers = {
-        "Authorization": f"Basic {BASE64_AUTH}",
-        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
-    }
-
-    # 🔥 IMPORTANTE: payload como string
     payload = f"grant_type=refresh_token&refresh_token={refresh_token}"
 
     for attempt in range(RETRY):
         try:
             response = requests.post(
                 url,
-                headers=headers,
+                auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
                 data=payload,
                 timeout=TIMEOUT
             )
