@@ -60,14 +60,12 @@ def update_refresh_token(new_token):
 
 
 # =========================
-# TOKEN REFRESH
+# TOKEN REFRESH (CORRETO)
 # =========================
 def refresh_access_token():
     refresh_token = get_refresh_token()
 
     url = f"{BASE_URL}/oauth2/token"
-
-    payload = f"grant_type=refresh_token&refresh_token={refresh_token}"
 
     for attempt in range(RETRY):
         try:
@@ -75,9 +73,12 @@ def refresh_access_token():
                 url,
                 auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
                 headers={
-                    "Content-Type": "application/x-www-form-urlencoded"
+                    "Accept": "application/json"
                 },
-                data=payload,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token
+                },
                 timeout=TIMEOUT
             )
 
