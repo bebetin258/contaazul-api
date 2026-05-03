@@ -11,7 +11,8 @@ CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-BASE_URL = "https://api-v2.contaazul.com"
+API_BASE_URL = "https://api-v2.contaazul.com"
+AUTH_URL = "https://auth.contaazul.com/oauth2/token"
 
 
 # =========================
@@ -62,10 +63,8 @@ def update_refresh_token(new_token):
 def refresh_access_token():
     refresh_token = get_refresh_token()
 
-    url = f"{BASE_URL}/oauth2/token"
-
     response = requests.post(
-        url,
+        AUTH_URL,
         auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
         headers={
             "Content-Type": "application/x-www-form-urlencoded"
@@ -88,7 +87,7 @@ def refresh_access_token():
     new_access_token = data["access_token"]
     new_refresh_token = data["refresh_token"]
 
-    # 🔥 Atualiza imediatamente (refresh rotativo)
+    # 🔥 importante: salva imediatamente
     update_refresh_token(new_refresh_token)
 
     print("🔐 Token atualizado com sucesso")
@@ -134,13 +133,13 @@ def fetch_all_pages(endpoint, token, params=None):
         }
 
         response = requests.get(
-            f"{BASE_URL}{endpoint}",
+            f"{API_BASE_URL}{endpoint}",
             headers=headers,
             params=params,
             timeout=30
         )
 
-        # 🔄 Se expirou, renova uma vez
+        # 🔄 se token expirar
         if response.status_code == 401:
             print("🔄 Token expirado, renovando...")
             token = refresh_access_token()
@@ -148,7 +147,7 @@ def fetch_all_pages(endpoint, token, params=None):
             headers["Authorization"] = f"Bearer {token}"
 
             response = requests.get(
-                f"{BASE_URL}{endpoint}",
+                f"{API_BASE_URL}{endpoint}",
                 headers=headers,
                 params=params,
                 timeout=30
