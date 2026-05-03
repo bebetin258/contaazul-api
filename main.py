@@ -1,256 +1,199 @@
 from fastapi import FastAPI
 import requests
-import psycopg2
 import os
 import time
-from datetime import datetime
 
 app = FastAPI()
 
 # ==============================
 # CONFIG
 # ==============================
+BASE_URL = "https://api-v2.contaazul.com"
+TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
+
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
-DB_URL = os.getenv("DATABASE_URL")
-
-BASE_URL = "https://api-v2.contaazul.com"
 
 # ==============================
-# TOKEN SEGURO (NÃO QUEBRA APP)
+# TOKEN AUTOMÁTICO
 # ==============================
-def get_access_token():
-    try:
-        url = "https://api.contaazul.com/oauth2/token"
-
-        response = requests.post(
-            url,
-            auth=(CLIENT_ID, CLIENT_SECRET),
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": REFRESH_TOKEN
-            },
-            timeout=10
-        )
-
-        if response.status_code != 200:
-            print("❌ ERRO TOKEN:", response.text)
-            return None
-
-        return response.json().get("access_token")
-
-    except Exception as e:
-        print("❌ ERRO TOKEN:", e)
-        return None
+access_token = None
+token_expire = 0
 
 
-# ==============================
-# DB
-# ==============================
-def get_conn():
-    return psycopg2.connect(DB_URL)
+def get_token():
+    global access_token, token_expire
+
+    if access_token and time.time() < token_expire:
+        return access_token
+
+    print("🔑 Gerando novo token...")
+
+    response = requests.post(
+        TOKEN_URL,
+        data={
+            "grant_type": "refresh_token",
+            "refresh_token": REFRESH_TOKEN,
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        },
+    )
+
+    data = response.json()
+
+    access_token = data["access_token"]
+    token_expire = time.time() + data.get("expires_in", 3600) - 60
+
+    print("✅ Token atualizado")
+
+    return access_token
 
 
-# ==============================
-# PAGINAÇÃO SEGURA
-# ==============================
-def fetch_all(endpoint):
-    token = get_access_token()
-
-    if not token:
-        print("⚠️ Sem token, abortando fetch")
-        return []
-
-    headers = {"Authorization": f"Bearer {token}"}
-
-    pagina = 1
-    all_data = []
-
-    while True:
-        print(f"📄 Página {pagina}")
-
-        try:
-            response = requests.get(
-                f"{BASE_URL}{endpoint}",
-                headers=headers,
-                params={
-                    "pagina": pagina,
-                    "tamanho_pagina": 100
-                },
-                timeout=15
-            )
-
-            if response.status_code == 401:
-                print("🔄 Token expirou")
-                return all_data
-
-            response.raise_for_status()
-            data = response.json()
-
-            if isinstance(data, dict):
-                itens = data.get("itens", [])
-            else:
-                itens = data
-
-            if not itens:
-                break
-
-            all_data.extend(itens)
-
-            if len(itens) < 100:
-                break
-
-            pagina += 1
-            time.sleep(0.2)
-
-        except Exception as e:
-            print("❌ ERRO FETCH:", e)
-            break
-
-    return all_data
-
-
-# ==============================
-# TRANSFORMAÇÃO CORRETA
-# ==============================
-def tratar_item(item, tipo):
+def headers():
     return {
-        "id": item.get("id"),
-        "tipo": tipo,
-        "descricao": item.get("descricao"),
-
-        "total": item.get("valor", {}).get("total"),
-
-        "data_vencimento": item.get("parcela", {}).get("data_vencimento"),
-        "data_competencia": item.get("data_competencia"),
-
-        "data_pagamento": item.get("data_pagamento"),
-        "metodo_pagamento": item.get("metodo_pagamento"),
-
-        "cliente": (
-            item.get("cliente", {}).get("nome")
-            if isinstance(item.get("cliente"), dict)
-            else None
-        ),
-
-        "fornecedor": (
-            item.get("fornecedor", {}).get("nome")
-            if isinstance(item.get("fornecedor"), dict)
-            else None
-        ),
-
-        "categoria": (
-            item.get("categorias")[0]["nome"]
-            if item.get("categorias") and isinstance(item.get("categorias"), list)
-            else None
-        ),
-
-        "atualizado_em": datetime.now()
+        "Authorization": f"Bearer {get_token()}",
+        "Content-Type": "application/json",
     }
 
 
 # ==============================
-# ETL (AGORA NÃO QUEBRA MAIS)
+# PAGINAÇÃO GENÉRICA (RESOLVE 100%)
 # ==============================
-def run_etl():
-    print("🚀 ETL INICIADO")
+def fetch_all_pages(endpoint, params=None):
+    pagina = 1
+    tamanho = 100
+    resultados = []
 
-    receber = fetch_all("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
-    pagar = fetch_all("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
+    while True:
+        print(f"📄 Página {pagina} - {endpoint}")
 
-    print("📥 RECEBER:", len(receber))
-    print("📤 PAGAR:", len(pagar))
-
-    if not receber and not pagar:
-        print("⚠️ Nenhum dado - abortando ETL")
-        return
-
-    conn = get_conn()
-    cur = conn.cursor()
-
-    cur.execute("DELETE FROM fato_financeiro")
-
-    for item in receber:
-        inserir(cur, tratar_item(item, "RECEBER"))
-
-    for item in pagar:
-        inserir(cur, tratar_item(item, "PAGAR"))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    print("✅ ETL FINALIZADO")
-
-
-def inserir(cur, item):
-    cur.execute("""
-        INSERT INTO fato_financeiro (
-            id, tipo, descricao, total,
-            data_vencimento, data_competencia,
-            data_pagamento, metodo_pagamento,
-            cliente, fornecedor, categoria, atualizado_em
+        response = requests.get(
+            f"{BASE_URL}{endpoint}",
+            headers=headers(),
+            params={**(params or {}), "pagina": pagina, "tamanho_pagina": tamanho},
         )
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT (id) DO NOTHING
-    """, (
-        item["id"],
-        item["tipo"],
-        item["descricao"],
-        item["total"],
-        item["data_vencimento"],
-        item["data_competencia"],
-        item["data_pagamento"],
-        item["metodo_pagamento"],
-        item["cliente"],
-        item["fornecedor"],
-        item["categoria"],
-        item["atualizado_em"]
-    ))
 
+        data = response.json()
 
-# ==============================
-# 🚫 REMOVIDO STARTUP AUTOMÁTICO
-# ==============================
-# NÃO rodar ETL aqui
+        # garante funcionamento independente da estrutura
+        if isinstance(data, list):
+            itens = data
+        else:
+            itens = data.get("itens", [])
+
+        if not itens:
+            break
+
+        resultados.extend(itens)
+
+        if len(itens) < tamanho:
+            break
+
+        pagina += 1
+
+    return resultados
 
 
 # ==============================
 # ENDPOINTS
 # ==============================
-@app.get("/financeiro")
-def financeiro():
-    conn = get_conn()
-    cur = conn.cursor()
 
-    cur.execute("SELECT * FROM fato_financeiro")
-    rows = cur.fetchall()
-
-    cols = [desc[0] for desc in cur.description]
-    result = [dict(zip(cols, row)) for row in rows]
-
-    cur.close()
-    conn.close()
-
-    return {"itens": result}
+@app.get("/")
+def home():
+    return {"status": "ok"}
 
 
-@app.get("/etl")
-def etl():
-    run_etl()
-    return {"status": "ETL executado"}
+# ------------------------------
+# CONTAS A RECEBER
+# ------------------------------
+@app.get("/contas-receber")
+def contas_receber():
+    dados = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar"
+    )
+    return dados
 
 
-@app.get("/status")
-def status():
-    conn = get_conn()
-    cur = conn.cursor()
+# ------------------------------
+# CONTAS A PAGAR
+# ------------------------------
+@app.get("/contas-pagar")
+def contas_pagar():
+    dados = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
+    )
+    return dados
 
-    cur.execute("SELECT COUNT(*) FROM fato_financeiro")
-    total = cur.fetchone()[0]
 
-    cur.close()
-    conn.close()
+# ------------------------------
+# CATEGORIAS
+# ------------------------------
+@app.get("/categorias")
+def categorias():
+    dados = fetch_all_pages("/v1/categorias")
+    return {"itens": dados}
 
-    return {"linhas": total}
+
+# ------------------------------
+# CATEGORIAS DRE
+# ------------------------------
+@app.get("/categorias-dre")
+def categorias_dre():
+    response = requests.get(
+        f"{BASE_URL}/v1/financeiro/categorias-dre",
+        headers=headers()
+    )
+    return response.json()
+
+
+# ------------------------------
+# CONTA FINANCEIRA
+# ------------------------------
+@app.get("/conta-financeira")
+def conta_financeira():
+    dados = fetch_all_pages("/v1/conta-financeira")
+    return {"itens": dados}
+
+
+# ------------------------------
+# BAIXAS (SIMPLES)
+# ------------------------------
+@app.get("/baixas")
+def baixas():
+    receber = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar"
+    )
+
+    pagar = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
+    )
+
+    todos = receber + pagar
+    resultado = []
+
+    for item in todos:
+        try:
+            parcela_id = item.get("id")
+
+            if not parcela_id:
+                continue
+
+            url = f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa"
+
+            response = requests.get(url, headers=headers())
+
+            if response.status_code == 200:
+                baixa = response.json()
+
+                resultado.append({
+                    "id": parcela_id,
+                    "data_pagamento": baixa.get("data_pagamento"),
+                    "valor": baixa.get("valor_composicao", {}).get("valor_bruto"),
+                    "metodo_pagamento": baixa.get("metodo_pagamento"),
+                })
+
+        except Exception as e:
+            continue
+
+    return resultado
