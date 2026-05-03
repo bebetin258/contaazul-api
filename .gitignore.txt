@@ -1,0 +1,12 @@
+# Variáveis de ambiente (SEGURANÇA)
+.env
+
+# Cache Python
+__pycache__/
+*.pyc
+
+# Arquivos grandes / BI
+*.pbix
+
+# Logs
+*.log
