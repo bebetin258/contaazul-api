@@ -1,12 +1,12 @@
-# Variáveis de ambiente (SEGURANÇA)
-.env
+# Ignorar Power BI
+*.pbix
 
-# Cache Python
+# Python
 __pycache__/
 *.pyc
 
-# Arquivos grandes / BI
-*.pbix
+# Ambiente
+.env
 
 # Logs
 *.log
