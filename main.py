@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import requests
 import os
 import time
+import base64
 
 app = FastAPI()
 
@@ -16,12 +17,15 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 # ==============================
-# TOKEN AUTOMÁTICO
+# TOKEN GLOBAL (CACHE)
 # ==============================
 access_token = None
 token_expire = 0
 
 
+# ==============================
+# TOKEN CORRETO (REFRESH TOKEN)
+# ==============================
 def get_token():
     global access_token, token_expire
 
@@ -30,17 +34,29 @@ def get_token():
 
     print("🔑 Gerando novo token...")
 
+    # 🔥 AUTH CORRETO
+    auth = f"{CLIENT_ID}:{CLIENT_SECRET}"
+    auth_base64 = base64.b64encode(auth.encode()).decode()
+
     response = requests.post(
         TOKEN_URL,
+        headers={
+            "Authorization": f"Basic {auth_base64}",
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
         data={
             "grant_type": "refresh_token",
-            "refresh_token": REFRESH_TOKEN,
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
+            "refresh_token": REFRESH_TOKEN
         },
+        timeout=10
     )
 
     data = response.json()
+
+    # 🔥 PROTEÇÃO CRÍTICA
+    if "access_token" not in data:
+        print("❌ ERRO AO GERAR TOKEN:", data)
+        raise Exception("Falha ao gerar access_token")
 
     access_token = data["access_token"]
     token_expire = time.time() + data.get("expires_in", 3600) - 60
@@ -50,17 +66,15 @@ def get_token():
     return access_token
 
 
-def headers():
-    return {
-        "Authorization": f"Bearer {get_token()}",
-        "Content-Type": "application/json",
-    }
+def get_headers():
+    token = get_token()
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ==============================
-# PAGINAÇÃO GENÉRICA (RESOLVE 100%)
+# PAGINAÇÃO (SEM ERRO DE LIST)
 # ==============================
-def fetch_all_pages(endpoint, params=None):
+def fetch_all_pages(endpoint):
     pagina = 1
     tamanho = 100
     resultados = []
@@ -70,13 +84,21 @@ def fetch_all_pages(endpoint, params=None):
 
         response = requests.get(
             f"{BASE_URL}{endpoint}",
-            headers=headers(),
-            params={**(params or {}), "pagina": pagina, "tamanho_pagina": tamanho},
+            headers=get_headers(),
+            params={
+                "pagina": pagina,
+                "tamanho_pagina": tamanho
+            },
+            timeout=20
         )
+
+        if response.status_code != 200:
+            print("❌ ERRO API:", response.text)
+            break
 
         data = response.json()
 
-        # garante funcionamento independente da estrutura
+        # 🔥 RESOLVE LIST VS DICT
         if isinstance(data, list):
             itens = data
         else:
@@ -91,6 +113,7 @@ def fetch_all_pages(endpoint, params=None):
             break
 
         pagina += 1
+        time.sleep(0.2)
 
     return resultados
 
@@ -104,61 +127,42 @@ def home():
     return {"status": "ok"}
 
 
-# ------------------------------
-# CONTAS A RECEBER
-# ------------------------------
 @app.get("/contas-receber")
 def contas_receber():
-    dados = fetch_all_pages(
+    return fetch_all_pages(
         "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar"
     )
-    return dados
 
 
-# ------------------------------
-# CONTAS A PAGAR
-# ------------------------------
 @app.get("/contas-pagar")
 def contas_pagar():
-    dados = fetch_all_pages(
+    return fetch_all_pages(
         "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
     )
-    return dados
 
 
-# ------------------------------
-# CATEGORIAS
-# ------------------------------
 @app.get("/categorias")
 def categorias():
-    dados = fetch_all_pages("/v1/categorias")
-    return {"itens": dados}
+    return {"itens": fetch_all_pages("/v1/categorias")}
 
 
-# ------------------------------
-# CATEGORIAS DRE
-# ------------------------------
 @app.get("/categorias-dre")
 def categorias_dre():
     response = requests.get(
         f"{BASE_URL}/v1/financeiro/categorias-dre",
-        headers=headers()
+        headers=get_headers()
     )
     return response.json()
 
 
-# ------------------------------
-# CONTA FINANCEIRA
-# ------------------------------
 @app.get("/conta-financeira")
 def conta_financeira():
-    dados = fetch_all_pages("/v1/conta-financeira")
-    return {"itens": dados}
+    return {"itens": fetch_all_pages("/v1/conta-financeira")}
 
 
-# ------------------------------
-# BAIXAS (SIMPLES)
-# ------------------------------
+# ==============================
+# BAIXAS (SEPARADO)
+# ==============================
 @app.get("/baixas")
 def baixas():
     receber = fetch_all_pages(
@@ -173,27 +177,30 @@ def baixas():
     resultado = []
 
     for item in todos:
+        parcela_id = item.get("id")
+
+        if not parcela_id:
+            continue
+
         try:
-            parcela_id = item.get("id")
-
-            if not parcela_id:
-                continue
-
-            url = f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa"
-
-            response = requests.get(url, headers=headers())
+            response = requests.get(
+                f"{BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+                headers=get_headers(),
+                timeout=10
+            )
 
             if response.status_code == 200:
-                baixa = response.json()
+                data = response.json()
 
-                resultado.append({
-                    "id": parcela_id,
-                    "data_pagamento": baixa.get("data_pagamento"),
-                    "valor": baixa.get("valor_composicao", {}).get("valor_bruto"),
-                    "metodo_pagamento": baixa.get("metodo_pagamento"),
-                })
+                if isinstance(data, dict):
+                    resultado.append({
+                        "id": parcela_id,
+                        "data_pagamento": data.get("data_pagamento"),
+                        "valor": data.get("valor_composicao", {}).get("valor_bruto"),
+                        "metodo_pagamento": data.get("metodo_pagamento"),
+                    })
 
-        except Exception as e:
+        except:
             continue
 
     return resultado
