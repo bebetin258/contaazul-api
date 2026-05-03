@@ -1,5 +1,5 @@
 requests==2.32.3
-psycopg2-binary==2.9.9
+psycopg[binary]==3.1.19
 
 # logs melhores (opcional)
 python-json-logger==2.0.7
