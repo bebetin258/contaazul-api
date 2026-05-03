@@ -36,7 +36,7 @@ def get_refresh_token():
     conn.close()
 
     if not result:
-        raise Exception("❌ Nenhum refresh_token encontrado no banco")
+        raise Exception("❌ Nenhum refresh_token encontrado")
 
     return result[0]
 
@@ -63,17 +63,15 @@ def update_refresh_token(new_token):
 def refresh_access_token():
     refresh_token = get_refresh_token()
 
-    url = f"{BASE_URL}/oauth2/token"
+    url = "https://api-v2.contaazul.com/oauth2/token"
 
     headers = {
         "Authorization": f"Basic {BASE64_AUTH}",
-        "Content-Type": "application/x-www-form-urlencoded"
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"
     }
 
-    payload = {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token
-    }
+    # 🔥 IMPORTANTE: payload como string
+    payload = f"grant_type=refresh_token&refresh_token={refresh_token}"
 
     for attempt in range(RETRY):
         try:
@@ -83,6 +81,9 @@ def refresh_access_token():
                 data=payload,
                 timeout=TIMEOUT
             )
+
+            print(f"🔄 Tentativa {attempt+1} - Status: {response.status_code}")
+            print("📨 Resposta:", response.text)
 
             if response.status_code != 200:
                 raise Exception(response.text)
@@ -99,7 +100,7 @@ def refresh_access_token():
             return new_access_token
 
         except Exception as e:
-            print(f"Erro ao atualizar token (tentativa {attempt+1}): {e}")
+            print(f"❌ Erro ao atualizar token: {e}")
             time.sleep(2)
 
     raise Exception("❌ Falha ao renovar token")
@@ -139,7 +140,7 @@ def make_request(url, headers, params):
             raise Exception(response.text)
 
         except Exception as e:
-            print(f"Erro request (tentativa {attempt+1}): {e}")
+            print(f"❌ Erro request (tentativa {attempt+1}): {e}")
             time.sleep(2)
 
     raise Exception("❌ Falha na requisição")
