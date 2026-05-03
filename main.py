@@ -57,7 +57,7 @@ def update_refresh_token(new_token):
 
 
 # =========================
-# TOKEN REFRESH (SEM RETRY)
+# TOKEN REFRESH (CORRETO)
 # =========================
 def refresh_access_token():
     refresh_token = get_refresh_token()
@@ -67,7 +67,9 @@ def refresh_access_token():
     response = requests.post(
         url,
         auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
-        headers={"Accept": "application/json"},
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded"
+        },
         data={
             "grant_type": "refresh_token",
             "refresh_token": refresh_token
@@ -86,7 +88,7 @@ def refresh_access_token():
     new_access_token = data["access_token"]
     new_refresh_token = data["refresh_token"]
 
-    # 🔥 CRÍTICO: salva imediatamente o novo refresh_token
+    # 🔥 Atualiza imediatamente (refresh rotativo)
     update_refresh_token(new_refresh_token)
 
     print("🔐 Token atualizado com sucesso")
@@ -138,7 +140,7 @@ def fetch_all_pages(endpoint, token, params=None):
             timeout=30
         )
 
-        # 🔄 Se token expirar, renova UMA vez
+        # 🔄 Se expirou, renova uma vez
         if response.status_code == 401:
             print("🔄 Token expirado, renovando...")
             token = refresh_access_token()
@@ -180,7 +182,6 @@ def fetch_all_pages(endpoint, token, params=None):
 def run():
     print("🚀 Iniciando execução...")
 
-    # 🔥 Gera access_token inicial corretamente
     token = refresh_access_token()
 
     endpoints = {
