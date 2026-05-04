@@ -22,12 +22,11 @@ AUTH_URL = "https://auth.contaazul.com/oauth2/token"
 ACCESS_TOKEN = None
 TOKEN_EXPIRATION = None
 
-# 🔥 CACHE
+# CACHE
 BAIXAS_CACHE = None
 BAIXAS_CACHE_TIME = None
-CACHE_TTL = 600  # 10 minutos
+CACHE_TTL = 600
 
-# 🔥 THREADS
 MAX_WORKERS = 10
 
 
@@ -61,7 +60,6 @@ def refresh_access_token():
     response = requests.post(
         AUTH_URL,
         auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
             "grant_type": "refresh_token",
             "refresh_token": get_refresh_token()
@@ -79,7 +77,6 @@ def refresh_access_token():
 
     update_refresh_token(data["refresh_token"])
 
-    print("🔐 Token atualizado")
     return ACCESS_TOKEN
 
 
@@ -148,6 +145,75 @@ def fetch_all_pages(endpoint, params=None):
 
 
 # =========================
+# BAIXAS (THREAD + CACHE)
+# =========================
+def get_baixa_parcela(parcela_id):
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+            headers=get_headers(),
+            timeout=30
+        )
+
+        if response.status_code != 200:
+            return []
+
+        data = response.json()
+
+        resultado = []
+
+        for b in data:
+            resultado.append({
+                "id_parcela": parcela_id,
+                "data_pagamento": b.get("data_pagamento"),
+                "banco": (b.get("conta_financeira") or {}).get("nome"),
+                "metodo_pagamento": b.get("metodo_pagamento"),
+                "tipo_evento_financeiro": b.get("tipo_evento_financeiro")
+            })
+
+        return resultado
+
+    except:
+        return []
+
+
+def get_all_baixas():
+    global BAIXAS_CACHE, BAIXAS_CACHE_TIME
+
+    if BAIXAS_CACHE and BAIXAS_CACHE_TIME:
+        if (datetime.now() - BAIXAS_CACHE_TIME).seconds < CACHE_TTL:
+            return BAIXAS_CACHE
+
+    filtro = {
+        "data_vencimento_de": "2000-01-01",
+        "data_vencimento_ate": "2100-12-31"
+    }
+
+    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar", filtro)
+    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar", filtro)
+
+    # 🔥 só quem tem pagamento
+    ids = [
+        i.get("id")
+        for i in pagar + receber
+        if i.get("data_pagamento") is not None
+    ]
+
+    resultado = []
+
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(get_baixa_parcela, pid) for pid in ids]
+
+        for future in as_completed(futures):
+            resultado.extend(future.result())
+
+    BAIXAS_CACHE = resultado
+    BAIXAS_CACHE_TIME = datetime.now()
+
+    return resultado
+
+
+# =========================
 # FINANCEIRO
 # =========================
 def get_financeiro():
@@ -156,31 +222,30 @@ def get_financeiro():
         "data_vencimento_ate": "2100-12-31"
     }
 
-    pagar = fetch_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        filtro
-    )
-
-    receber = fetch_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        filtro
-    )
+    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar", filtro)
+    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar", filtro)
 
     financeiro = []
 
     def transformar(item, tipo):
+
+        nome = None
+
+        if isinstance(item.get("fornecedor"), dict):
+            nome = item["fornecedor"].get("nome")
+
+        if isinstance(item.get("cliente"), dict):
+            nome = item["cliente"].get("nome")
+
         return {
             "id": item.get("id"),
-            "tipo": tipo,
+            "tipo_evento_financeiro": tipo,
             "descricao": item.get("descricao"),
             "total": item.get("total"),
             "data_vencimento": item.get("data_vencimento"),
             "data_competencia": item.get("data_competencia"),
-            "fornecedor": (
-                item.get("fornecedor", {}).get("nome")
-                if isinstance(item.get("fornecedor"), dict)
-                else None
-            ),
+            "data_pagamento": item.get("data_pagamento"),
+            "fornecedor": nome,
             "categoria": (
                 item.get("categorias")[0]["nome"]
                 if item.get("categorias")
@@ -201,93 +266,6 @@ def get_financeiro():
         financeiro.append(transformar(item, "RECEITA"))
 
     return financeiro
-
-
-# =========================
-# BAIXA (THREAD SAFE)
-# =========================
-def get_baixa_parcela(parcela_id):
-    try:
-        response = requests.get(
-            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
-            headers=get_headers(),
-            timeout=30
-        )
-
-        if response.status_code == 404:
-            return []
-
-        if response.status_code == 401:
-            refresh_access_token()
-            return get_baixa_parcela(parcela_id)
-
-        if response.status_code != 200:
-            print(f"Erro {parcela_id}: {response.text}")
-            return []
-
-        data = response.json()
-
-        for b in data:
-            b["id_parcela"] = parcela_id
-
-        return data
-
-    except Exception as e:
-        print(f"Erro thread {parcela_id}: {e}")
-        return []
-
-
-# =========================
-# BAIXAS (THREAD + CACHE)
-# =========================
-def get_all_baixas():
-    global BAIXAS_CACHE, BAIXAS_CACHE_TIME
-
-    # 🔥 CACHE
-    if BAIXAS_CACHE and BAIXAS_CACHE_TIME:
-        if (datetime.now() - BAIXAS_CACHE_TIME).seconds < CACHE_TTL:
-            print("⚡ Usando cache")
-            return BAIXAS_CACHE
-
-    filtro = {
-        "data_vencimento_de": "2000-01-01",
-        "data_vencimento_ate": "2100-12-31"
-    }
-
-    pagar = fetch_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        filtro
-    )
-
-    receber = fetch_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-        filtro
-    )
-
-    ids = list(set(
-        [i.get("id") for i in pagar] +
-        [i.get("id") for i in receber]
-    ))
-
-    print(f"🔎 Total parcelas: {len(ids)}")
-
-    resultado = []
-
-    # 🔥 THREADS
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(get_baixa_parcela, pid) for pid in ids]
-
-        for i, future in enumerate(as_completed(futures)):
-            print(f"📌 {i+1}/{len(ids)}")
-            resultado.extend(future.result())
-
-    print(f"💰 Total baixas: {len(resultado)}")
-
-    # 🔥 salva cache
-    BAIXAS_CACHE = resultado
-    BAIXAS_CACHE_TIME = datetime.now()
-
-    return resultado
 
 
 # =========================
