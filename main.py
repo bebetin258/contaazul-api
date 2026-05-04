@@ -5,6 +5,7 @@ import psycopg
 from datetime import datetime, timedelta
 from requests.auth import HTTPBasicAuth
 from fastapi import FastAPI
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = FastAPI()
 
@@ -21,9 +22,17 @@ AUTH_URL = "https://auth.contaazul.com/oauth2/token"
 ACCESS_TOKEN = None
 TOKEN_EXPIRATION = None
 
+# 🔥 CACHE
+BAIXAS_CACHE = None
+BAIXAS_CACHE_TIME = None
+CACHE_TTL = 600  # 10 minutos
+
+# 🔥 THREADS
+MAX_WORKERS = 10
+
 
 # =========================
-# DB TOKEN
+# DB
 # =========================
 def get_connection():
     return psycopg.connect(DATABASE_URL)
@@ -134,13 +143,12 @@ def fetch_all_pages(endpoint, params=None):
             break
 
         page += 1
-        time.sleep(0.2)
 
     return all_data
 
 
 # =========================
-# FINANCEIRO (FLATTEN)
+# FINANCEIRO
 # =========================
 def get_financeiro():
     filtro = {
@@ -196,30 +204,51 @@ def get_financeiro():
 
 
 # =========================
-# BAIXAS (ORIGINAL)
+# BAIXA (THREAD SAFE)
 # =========================
 def get_baixa_parcela(parcela_id):
-    response = requests.get(
-        f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
-        headers=get_headers(),
-        timeout=30
-    )
+    try:
+        response = requests.get(
+            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+            headers=get_headers(),
+            timeout=30
+        )
 
-    if response.status_code == 404:
+        if response.status_code == 404:
+            return []
+
+        if response.status_code == 401:
+            refresh_access_token()
+            return get_baixa_parcela(parcela_id)
+
+        if response.status_code != 200:
+            print(f"Erro {parcela_id}: {response.text}")
+            return []
+
+        data = response.json()
+
+        for b in data:
+            b["id_parcela"] = parcela_id
+
+        return data
+
+    except Exception as e:
+        print(f"Erro thread {parcela_id}: {e}")
         return []
 
-    if response.status_code == 401:
-        refresh_access_token()
-        return get_baixa_parcela(parcela_id)
 
-    if response.status_code != 200:
-        print(f"Erro {parcela_id}: {response.text}")
-        return []
-
-    return response.json()
-
-
+# =========================
+# BAIXAS (THREAD + CACHE)
+# =========================
 def get_all_baixas():
+    global BAIXAS_CACHE, BAIXAS_CACHE_TIME
+
+    # 🔥 CACHE
+    if BAIXAS_CACHE and BAIXAS_CACHE_TIME:
+        if (datetime.now() - BAIXAS_CACHE_TIME).seconds < CACHE_TTL:
+            print("⚡ Usando cache")
+            return BAIXAS_CACHE
+
     filtro = {
         "data_vencimento_de": "2000-01-01",
         "data_vencimento_ate": "2100-12-31"
@@ -235,31 +264,28 @@ def get_all_baixas():
         filtro
     )
 
-    ids = set()
-
-    for item in pagar:
-        ids.add(item.get("id"))
-
-    for item in receber:
-        ids.add(item.get("id"))
+    ids = list(set(
+        [i.get("id") for i in pagar] +
+        [i.get("id") for i in receber]
+    ))
 
     print(f"🔎 Total parcelas: {len(ids)}")
 
     resultado = []
 
-    for i, parcela_id in enumerate(ids):
-        print(f"📌 {i+1}/{len(ids)}")
+    # 🔥 THREADS
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(get_baixa_parcela, pid) for pid in ids]
 
-        baixas = get_baixa_parcela(parcela_id)
-
-        for b in baixas:
-            # 🔥 mantém estrutura original
-            b["id_parcela"] = parcela_id
-            resultado.append(b)
-
-        time.sleep(0.1)
+        for i, future in enumerate(as_completed(futures)):
+            print(f"📌 {i+1}/{len(ids)}")
+            resultado.extend(future.result())
 
     print(f"💰 Total baixas: {len(resultado)}")
+
+    # 🔥 salva cache
+    BAIXAS_CACHE = resultado
+    BAIXAS_CACHE_TIME = datetime.now()
 
     return resultado
 
