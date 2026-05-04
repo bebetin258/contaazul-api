@@ -196,7 +196,7 @@ def get_financeiro():
 
 
 # =========================
-# BAIXAS (FLATTEN)
+# BAIXAS (ORIGINAL)
 # =========================
 def get_baixa_parcela(parcela_id):
     response = requests.get(
@@ -253,17 +253,9 @@ def get_all_baixas():
         baixas = get_baixa_parcela(parcela_id)
 
         for b in baixas:
-            resultado.append({
-                "id_parcela": parcela_id,
-                "id_baixa": b.get("id"),
-                "data_pagamento": b.get("data_pagamento"),
-                "valor_bruto": b.get("valor_composicao", {}).get("valor_bruto"),
-                "juros": b.get("valor_composicao", {}).get("juros"),
-                "multa": b.get("valor_composicao", {}).get("multa"),
-                "desconto": b.get("valor_composicao", {}).get("desconto"),
-                "metodo_pagamento": b.get("metodo_pagamento"),
-                "tipo": b.get("tipo_evento_financeiro")
-            })
+            # 🔥 mantém estrutura original
+            b["id_parcela"] = parcela_id
+            resultado.append(b)
 
         time.sleep(0.1)
 
