@@ -18,13 +18,12 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 API_BASE_URL = "https://api-v2.contaazul.com"
 AUTH_URL = "https://auth.contaazul.com/oauth2/token"
 
-# CACHE TOKEN
 ACCESS_TOKEN = None
 TOKEN_EXPIRATION = None
 
 
 # =========================
-# DB
+# DB TOKEN
 # =========================
 def get_connection():
     return psycopg.connect(DATABASE_URL)
@@ -34,22 +33,13 @@ def get_refresh_token():
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT refresh_token FROM tokens WHERE id = 1;")
-            result = cur.fetchone()
-
-    if not result:
-        raise Exception("❌ Nenhum refresh_token encontrado")
-
-    return result[0]
+            return cur.fetchone()[0]
 
 
 def update_refresh_token(new_token):
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
-                UPDATE tokens
-                SET refresh_token = %s
-                WHERE id = 1
-            """, (new_token,))
+            cur.execute("UPDATE tokens SET refresh_token = %s WHERE id = 1", (new_token,))
         conn.commit()
 
 
@@ -57,7 +47,7 @@ def update_refresh_token(new_token):
 # TOKEN
 # =========================
 def refresh_access_token():
-    refresh_token = get_refresh_token()
+    global ACCESS_TOKEN, TOKEN_EXPIRATION
 
     response = requests.post(
         AUTH_URL,
@@ -65,35 +55,26 @@ def refresh_access_token():
         headers={"Content-Type": "application/x-www-form-urlencoded"},
         data={
             "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        },
-        timeout=30
+            "refresh_token": get_refresh_token()
+        }
     )
 
     if response.status_code != 200:
-        print(response.text)
-        raise Exception("❌ Falha ao renovar token")
+        raise Exception(response.text)
 
     data = response.json()
-
-    global ACCESS_TOKEN, TOKEN_EXPIRATION
 
     ACCESS_TOKEN = data["access_token"]
     TOKEN_EXPIRATION = datetime.now() + timedelta(seconds=data["expires_in"] - 60)
 
     update_refresh_token(data["refresh_token"])
 
-    print("🔐 Token atualizado")
-
     return ACCESS_TOKEN
 
 
 def get_access_token():
-    global ACCESS_TOKEN, TOKEN_EXPIRATION
-
-    if ACCESS_TOKEN and TOKEN_EXPIRATION and datetime.now() < TOKEN_EXPIRATION:
+    if ACCESS_TOKEN and datetime.now() < TOKEN_EXPIRATION:
         return ACCESS_TOKEN
-
     return refresh_access_token()
 
 
@@ -105,22 +86,7 @@ def get_headers():
 
 
 # =========================
-# UTIL
-# =========================
-def extract_list(data):
-    if isinstance(data, list):
-        return data
-
-    if isinstance(data, dict):
-        for v in data.values():
-            if isinstance(v, list):
-                return v
-
-    return []
-
-
-# =========================
-# PAGINAÇÃO ROBUSTA
+# PAGINAÇÃO
 # =========================
 def fetch_all_pages(endpoint, params=None):
     if params is None:
@@ -128,119 +94,122 @@ def fetch_all_pages(endpoint, params=None):
 
     all_data = []
     page = 1
-    page_size = 100
 
     while True:
-        current_params = params.copy()
-        current_params.update({
+        params.update({
             "pagina": page,
-            "tamanho_pagina": page_size
+            "tamanho_pagina": 100
         })
 
         response = requests.get(
             f"{API_BASE_URL}{endpoint}",
             headers=get_headers(),
-            params=current_params,
-            timeout=30
+            params=params
         )
 
-        # 🔄 refresh automático
         if response.status_code == 401:
-            print("🔄 Token expirado...")
             refresh_access_token()
-
-            response = requests.get(
-                f"{API_BASE_URL}{endpoint}",
-                headers=get_headers(),
-                params=current_params,
-                timeout=30
-            )
+            continue
 
         if response.status_code != 200:
             print(response.text)
-            raise Exception("Erro na API")
-
-        data = response.json()
-        page_data = extract_list(data)
-
-        if not page_data:
-            print("📭 Fim dos dados")
             break
 
-        all_data.extend(page_data)
+        data = response.json()
 
-        print(f"📄 Página {page}: {len(page_data)} registros")
+        lista = data if isinstance(data, list) else next(
+            (v for v in data.values() if isinstance(v, list)), []
+        )
 
-        # 🔥 parada segura
-        if len(page_data) < page_size:
+        if not lista:
+            break
+
+        all_data.extend(lista)
+
+        if len(lista) < 100:
             break
 
         page += 1
         time.sleep(0.2)
 
-    print(f"📊 Total coletado: {len(all_data)}")
-
     return all_data
 
 
 # =========================
-# PARAM GLOBAL (AMPLIADO)
+# BAIXAS
 # =========================
-DEFAULT_DATE_FILTER = {
-    "data_vencimento_de": "2000-01-01",
-    "data_vencimento_ate": "2100-12-31"
-}
-
-
-# =========================
-# ENDPOINTS
-# =========================
-@app.get("/categorias")
-def categorias():
-    return {"itens": fetch_all_pages("/v1/categorias")}
-
-
-@app.get("/categorias_dre")
-def categorias_dre():
-    return {"itens": fetch_all_pages("/v1/financeiro/categorias-dre")}
-
-
-@app.get("/contas")
-def contas():
-    return {"itens": fetch_all_pages("/v1/conta-financeira")}
-
-
-@app.get("/contas_receber")
-def contas_receber():
-    return {
-        "itens": fetch_all_pages(
-            "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-            DEFAULT_DATE_FILTER
-        )
-    }
-
-
-@app.get("/contas_pagar")
-def contas_pagar():
-    return {
-        "itens": fetch_all_pages(
-            "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-            DEFAULT_DATE_FILTER
-        )
-    }
-
-
-# =========================
-# TESTE LOCAL
-# =========================
-def run():
-    print("🚀 Testando...")
-    data = fetch_all_pages(
-        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-        DEFAULT_DATE_FILTER
+def get_baixa(parcela_id):
+    response = requests.get(
+        f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+        headers=get_headers()
     )
-    print(len(data))
+
+    if response.status_code == 404:
+        return []
+
+    if response.status_code == 401:
+        refresh_access_token()
+        return get_baixa(parcela_id)
+
+    if response.status_code != 200:
+        return []
+
+    return response.json()
 
 
-if __name__ == "__main__":
-    run()
+# =========================
+# FINANCEIRO CONSOLIDADO
+# =========================
+def get_financeiro():
+    filtro = {
+        "data_vencimento_de": "2000-01-01",
+        "data_vencimento_ate": "2100-12-31"
+    }
+
+    pagar = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+        filtro
+    )
+
+    receber = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        filtro
+    )
+
+    financeiro = []
+
+    # DESPESAS
+    for item in pagar:
+        novo = item.copy()
+
+        novo["tipo"] = "DESPESA"
+        novo["fornecedor"] = item.get("fornecedor") or item.get("nome_fornecedor")
+        novo["centro_custo"] = item.get("centro_custo") or item.get("categoria")
+
+        novo["baixas"] = get_baixa(item["id"])
+
+        financeiro.append(novo)
+
+    # RECEITAS
+    for item in receber:
+        novo = item.copy()
+
+        novo["tipo"] = "RECEITA"
+        novo["fornecedor"] = item.get("cliente") or item.get("nome_cliente")
+        novo["centro_custo"] = item.get("centro_custo") or item.get("categoria")
+
+        novo["baixas"] = get_baixa(item["id"])
+
+        financeiro.append(novo)
+
+    print(f"📊 Total financeiro: {len(financeiro)}")
+
+    return financeiro
+
+
+# =========================
+# ENDPOINT FINAL
+# =========================
+@app.get("/financeiro")
+def financeiro():
+    return {"itens": get_financeiro()}
