@@ -56,7 +56,8 @@ def refresh_access_token():
         data={
             "grant_type": "refresh_token",
             "refresh_token": get_refresh_token()
-        }
+        },
+        timeout=30
     )
 
     if response.status_code != 200:
@@ -69,11 +70,12 @@ def refresh_access_token():
 
     update_refresh_token(data["refresh_token"])
 
+    print("🔐 Token atualizado")
     return ACCESS_TOKEN
 
 
 def get_access_token():
-    if ACCESS_TOKEN and datetime.now() < TOKEN_EXPIRATION:
+    if ACCESS_TOKEN and TOKEN_EXPIRATION and datetime.now() < TOKEN_EXPIRATION:
         return ACCESS_TOKEN
     return refresh_access_token()
 
@@ -96,7 +98,8 @@ def fetch_all_pages(endpoint, params=None):
     page = 1
 
     while True:
-        params.update({
+        current_params = params.copy()
+        current_params.update({
             "pagina": page,
             "tamanho_pagina": 100
         })
@@ -104,7 +107,8 @@ def fetch_all_pages(endpoint, params=None):
         response = requests.get(
             f"{API_BASE_URL}{endpoint}",
             headers=get_headers(),
-            params=params
+            params=current_params,
+            timeout=30
         )
 
         if response.status_code == 401:
@@ -136,29 +140,7 @@ def fetch_all_pages(endpoint, params=None):
 
 
 # =========================
-# BAIXAS
-# =========================
-def get_baixa(parcela_id):
-    response = requests.get(
-        f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
-        headers=get_headers()
-    )
-
-    if response.status_code == 404:
-        return []
-
-    if response.status_code == 401:
-        refresh_access_token()
-        return get_baixa(parcela_id)
-
-    if response.status_code != 200:
-        return []
-
-    return response.json()
-
-
-# =========================
-# FINANCEIRO CONSOLIDADO
+# FINANCEIRO (FLATTEN)
 # =========================
 def get_financeiro():
     filtro = {
@@ -178,38 +160,126 @@ def get_financeiro():
 
     financeiro = []
 
-    # DESPESAS
+    def transformar(item, tipo):
+        return {
+            "id": item.get("id"),
+            "tipo": tipo,
+            "descricao": item.get("descricao"),
+            "total": item.get("total"),
+            "data_vencimento": item.get("data_vencimento"),
+            "data_competencia": item.get("data_competencia"),
+            "fornecedor": (
+                item.get("fornecedor", {}).get("nome")
+                if isinstance(item.get("fornecedor"), dict)
+                else None
+            ),
+            "categoria": (
+                item.get("categorias")[0]["nome"]
+                if item.get("categorias")
+                else None
+            ),
+            "centro_custo": (
+                item.get("centros_de_custo")[0]["nome"]
+                if item.get("centros_de_custo")
+                else None
+            ),
+            "atualizado_em": item.get("atualizado_em")
+        }
+
     for item in pagar:
-        novo = item.copy()
+        financeiro.append(transformar(item, "DESPESA"))
 
-        novo["tipo"] = "DESPESA"
-        novo["fornecedor"] = item.get("fornecedor") or item.get("nome_fornecedor")
-        novo["centro_custo"] = item.get("centro_custo") or item.get("categoria")
-
-        novo["baixas"] = get_baixa(item["id"])
-
-        financeiro.append(novo)
-
-    # RECEITAS
     for item in receber:
-        novo = item.copy()
-
-        novo["tipo"] = "RECEITA"
-        novo["fornecedor"] = item.get("cliente") or item.get("nome_cliente")
-        novo["centro_custo"] = item.get("centro_custo") or item.get("categoria")
-
-        novo["baixas"] = get_baixa(item["id"])
-
-        financeiro.append(novo)
-
-    print(f"📊 Total financeiro: {len(financeiro)}")
+        financeiro.append(transformar(item, "RECEITA"))
 
     return financeiro
 
 
 # =========================
-# ENDPOINT FINAL
+# BAIXAS (FLATTEN)
+# =========================
+def get_baixa_parcela(parcela_id):
+    response = requests.get(
+        f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
+        headers=get_headers(),
+        timeout=30
+    )
+
+    if response.status_code == 404:
+        return []
+
+    if response.status_code == 401:
+        refresh_access_token()
+        return get_baixa_parcela(parcela_id)
+
+    if response.status_code != 200:
+        print(f"Erro {parcela_id}: {response.text}")
+        return []
+
+    return response.json()
+
+
+def get_all_baixas():
+    filtro = {
+        "data_vencimento_de": "2000-01-01",
+        "data_vencimento_ate": "2100-12-31"
+    }
+
+    pagar = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+        filtro
+    )
+
+    receber = fetch_all_pages(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+        filtro
+    )
+
+    ids = set()
+
+    for item in pagar:
+        ids.add(item.get("id"))
+
+    for item in receber:
+        ids.add(item.get("id"))
+
+    print(f"🔎 Total parcelas: {len(ids)}")
+
+    resultado = []
+
+    for i, parcela_id in enumerate(ids):
+        print(f"📌 {i+1}/{len(ids)}")
+
+        baixas = get_baixa_parcela(parcela_id)
+
+        for b in baixas:
+            resultado.append({
+                "id_parcela": parcela_id,
+                "id_baixa": b.get("id"),
+                "data_pagamento": b.get("data_pagamento"),
+                "valor_bruto": b.get("valor_composicao", {}).get("valor_bruto"),
+                "juros": b.get("valor_composicao", {}).get("juros"),
+                "multa": b.get("valor_composicao", {}).get("multa"),
+                "desconto": b.get("valor_composicao", {}).get("desconto"),
+                "metodo_pagamento": b.get("metodo_pagamento"),
+                "tipo": b.get("tipo_evento_financeiro")
+            })
+
+        time.sleep(0.1)
+
+    print(f"💰 Total baixas: {len(resultado)}")
+
+    return resultado
+
+
+# =========================
+# ENDPOINTS
 # =========================
 @app.get("/financeiro")
 def financeiro():
     return {"itens": get_financeiro()}
+
+
+@app.get("/baixas")
+def baixas():
+    return {"itens": get_all_baixas()}
