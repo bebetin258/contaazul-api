@@ -1,7 +1,7 @@
 import requests
 import os
 import psycopg
-from datetime import datetime, timedelta
+from datetime import datetime
 from requests.auth import HTTPBasicAuth
 from fastapi import FastAPI
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -21,16 +21,11 @@ AUTH_URL = "https://auth.contaazul.com/oauth2/token"
 ACCESS_TOKEN = None
 TOKEN_EXPIRATION = None
 
-# CACHE
-BAIXAS_CACHE = None
-BAIXAS_CACHE_TIME = None
-CACHE_TTL = 600
-
 MAX_WORKERS = 10
 
 
 # =========================
-# DB
+# DB TOKEN
 # =========================
 def get_connection():
     return psycopg.connect(DATABASE_URL)
@@ -62,8 +57,7 @@ def refresh_access_token():
         data={
             "grant_type": "refresh_token",
             "refresh_token": get_refresh_token()
-        },
-        timeout=30
+        }
     )
 
     if response.status_code != 200:
@@ -72,7 +66,7 @@ def refresh_access_token():
     data = response.json()
 
     ACCESS_TOKEN = data["access_token"]
-    TOKEN_EXPIRATION = datetime.now() + timedelta(seconds=data["expires_in"] - 60)
+    TOKEN_EXPIRATION = datetime.now()
 
     update_refresh_token(data["refresh_token"])
 
@@ -80,9 +74,7 @@ def refresh_access_token():
 
 
 def get_access_token():
-    if ACCESS_TOKEN and TOKEN_EXPIRATION and datetime.now() < TOKEN_EXPIRATION:
-        return ACCESS_TOKEN
-    return refresh_access_token()
+    return ACCESS_TOKEN if ACCESS_TOKEN else refresh_access_token()
 
 
 def get_headers():
@@ -93,7 +85,7 @@ def get_headers():
 
 
 # =========================
-# PAGINAÇÃO CORRETA
+# PAGINAÇÃO PADRÃO
 # =========================
 def fetch_all_pages(endpoint):
 
@@ -111,12 +103,8 @@ def fetch_all_pages(endpoint):
         response = requests.get(
             f"{API_BASE_URL}{endpoint}",
             headers=get_headers(),
-            params=params,
-            timeout=30
+            params=params
         )
-
-        print("URL:", response.url)
-        print("STATUS:", response.status_code)
 
         if response.status_code == 401:
             refresh_access_token()
@@ -128,17 +116,15 @@ def fetch_all_pages(endpoint):
 
         data = response.json()
 
-        # 🔥 CORREÇÃO DEFINITIVA
         items = data.get("itens", [])
+        total_paginas = data.get("total_paginas", 1)
 
-        print("REGISTROS NA PAGINA:", len(items))
+        print(f"{endpoint} - PAGINA {page}/{total_paginas} - {len(items)} registros")
 
         if not items:
             break
 
         all_data.extend(items)
-
-        total_paginas = data.get("total_paginas", 1)
 
         if page >= total_paginas:
             break
@@ -149,14 +135,55 @@ def fetch_all_pages(endpoint):
 
 
 # =========================
-# BAIXAS
+# ENDPOINTS BASE
 # =========================
-def get_baixa_parcela(parcela_id):
+@app.get("/contas-pagar")
+def contas_pagar():
+    data = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
+    return {"itens": data}
+
+
+@app.get("/contas-receber")
+def contas_receber():
+    data = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
+    return {"itens": data}
+
+
+@app.get("/categorias")
+def categorias():
+    response = requests.get(
+        f"{API_BASE_URL}/v1/categorias",
+        headers=get_headers()
+    )
+    return response.json()
+
+
+@app.get("/categorias-dre")
+def categorias_dre():
+    response = requests.get(
+        f"{API_BASE_URL}/v1/categorias/dre",
+        headers=get_headers()
+    )
+    return response.json()
+
+
+@app.get("/contas-financeiras")
+def contas_financeiras():
+    response = requests.get(
+        f"{API_BASE_URL}/v1/financeiro/contas-financeiras",
+        headers=get_headers()
+    )
+    return response.json()
+
+
+# =========================
+# BAIXAS (PARALELO)
+# =========================
+def get_baixa(parcela_id):
     try:
         response = requests.get(
             f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/parcelas/{parcela_id}/baixa",
-            headers=get_headers(),
-            timeout=30
+            headers=get_headers()
         )
 
         if response.status_code != 200:
@@ -167,9 +194,14 @@ def get_baixa_parcela(parcela_id):
         return [
             {
                 "id_parcela": parcela_id,
+                "id_baixa": b.get("id"),
                 "data_pagamento": b.get("data_pagamento"),
-                "conta_financeira": b.get("conta_financeira"),
-                "metodo_pagamento": b.get("metodo_pagamento")
+                "valor_bruto": b.get("valor_composicao", {}).get("valor_bruto"),
+                "juros": b.get("valor_composicao", {}).get("juros"),
+                "multa": b.get("valor_composicao", {}).get("multa"),
+                "desconto": b.get("valor_composicao", {}).get("desconto"),
+                "metodo_pagamento": b.get("metodo_pagamento"),
+                "tipo": b.get("tipo_evento_financeiro")
             }
             for b in data
         ]
@@ -178,119 +210,20 @@ def get_baixa_parcela(parcela_id):
         return []
 
 
-def get_all_baixas():
-    global BAIXAS_CACHE, BAIXAS_CACHE_TIME
-
-    if BAIXAS_CACHE and BAIXAS_CACHE_TIME:
-        if (datetime.now() - BAIXAS_CACHE_TIME).seconds < CACHE_TTL:
-            return BAIXAS_CACHE
+@app.get("/baixas")
+def baixas():
 
     pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
     receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
 
-    print(f"PAGAR: {len(pagar)} | RECEBER: {len(receber)}")
-
-    ids = [
-        i.get("id")
-        for i in pagar + receber
-        if i.get("data_pagamento") is not None
-    ]
+    ids = [i.get("id") for i in pagar + receber]
 
     resultado = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(get_baixa_parcela, pid) for pid in ids]
+        futures = [executor.submit(get_baixa, pid) for pid in ids]
 
         for future in as_completed(futures):
             resultado.extend(future.result())
 
-    BAIXAS_CACHE = resultado
-    BAIXAS_CACHE_TIME = datetime.now()
-
-    print(f"💰 Total baixas: {len(resultado)}")
-
-    return resultado
-
-
-# =========================
-# FINANCEIRO
-# =========================
-def get_financeiro():
-
-    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
-    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
-
-    print(f"PAGAR: {len(pagar)} | RECEBER: {len(receber)}")
-
-    baixas = get_all_baixas()
-    mapa_baixas = {b["id_parcela"]: b for b in baixas}
-
-    financeiro = []
-
-    def transformar(item, tipo):
-
-        nome = None
-
-        if isinstance(item.get("fornecedor"), dict):
-            nome = item["fornecedor"].get("nome")
-
-        if isinstance(item.get("cliente"), dict):
-            nome = item["cliente"].get("nome")
-
-        baixa = mapa_baixas.get(item.get("id"))
-
-        return {
-            "id": item.get("id"),
-            "tipo_evento_financeiro": tipo,
-            "descricao": item.get("descricao"),
-            "total": item.get("total"),
-            "data_vencimento": item.get("data_vencimento"),
-            "data_competencia": item.get("data_competencia"),
-
-            "data_pagamento": (
-                baixa["data_pagamento"] if baixa else item.get("data_pagamento")
-            ),
-
-            "conta_financeira": (
-                baixa["conta_financeira"] if baixa else None
-            ),
-
-            "metodo_pagamento": (
-                baixa["metodo_pagamento"] if baixa else None
-            ),
-
-            "fornecedor": nome,
-
-            "categoria": (
-                item.get("categorias")[0]["nome"]
-                if item.get("categorias")
-                else None
-            ),
-
-            "centro_custo": (
-                item.get("centros_de_custo")[0]["nome"]
-                if item.get("centros_de_custo")
-                else None
-            )
-        }
-
-    for item in pagar:
-        financeiro.append(transformar(item, "DESPESA"))
-
-    for item in receber:
-        financeiro.append(transformar(item, "RECEITA"))
-
-    return financeiro
-
-
-# =========================
-# ENDPOINTS
-# =========================
-@app.get("/financeiro")
-def financeiro():
-    return {"itens": get_financeiro()}
-
-
-@app.get("/baixas")
-def baixas():
-    return {"itens": get_all_baixas()}
+    return {"itens": resultado}
