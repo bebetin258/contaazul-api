@@ -93,7 +93,7 @@ def get_headers():
 
 
 # =========================
-# PAGINAÇÃO (VERSÃO ESTÁVEL)
+# PAGINAÇÃO CORRETA
 # =========================
 def fetch_all_pages(endpoint):
 
@@ -103,7 +103,11 @@ def fetch_all_pages(endpoint):
     while True:
         params = {
             "pagina": page,
-            "tamanho_pagina": 100
+            "tamanho_pagina": 100,
+
+            # 🔥 OBRIGATÓRIO
+            "data_vencimento_de": "2000-01-01",
+            "data_vencimento_ate": "2100-12-31"
         }
 
         response = requests.get(
@@ -125,7 +129,6 @@ def fetch_all_pages(endpoint):
             break
 
         data = response.json()
-
         items = data.get("items", [])
 
         if not items:
@@ -157,17 +160,15 @@ def get_baixa_parcela(parcela_id):
 
         data = response.json()
 
-        resultado = []
-
-        for b in data:
-            resultado.append({
+        return [
+            {
                 "id_parcela": parcela_id,
                 "data_pagamento": b.get("data_pagamento"),
                 "conta_financeira": b.get("conta_financeira"),
                 "metodo_pagamento": b.get("metodo_pagamento")
-            })
-
-        return resultado
+            }
+            for b in data
+        ]
 
     except:
         return []
