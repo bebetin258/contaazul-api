@@ -1,5 +1,4 @@
 import requests
-import time
 import os
 import psycopg
 from datetime import datetime, timedelta
@@ -94,49 +93,47 @@ def get_headers():
 
 
 # =========================
-# PAGINAÇÃO
+# PAGINAÇÃO (VERSÃO ESTÁVEL)
 # =========================
-def fetch_all_pages(endpoint, params=None):
-    if params is None:
-        params = {}
+def fetch_all_pages(endpoint):
 
     all_data = []
     page = 1
 
     while True:
-        current_params = params.copy()
-        current_params.update({
+        params = {
             "pagina": page,
             "tamanho_pagina": 100
-        })
+        }
 
         response = requests.get(
             f"{API_BASE_URL}{endpoint}",
             headers=get_headers(),
-            params=current_params,
+            params=params,
             timeout=30
         )
+
+        print("URL:", response.url)
+        print("STATUS:", response.status_code)
 
         if response.status_code == 401:
             refresh_access_token()
             continue
 
         if response.status_code != 200:
-            print(response.text)
+            print("ERRO REAL:", response.text)
             break
 
         data = response.json()
 
-        lista = data if isinstance(data, list) else next(
-            (v for v in data.values() if isinstance(v, list)), []
-        )
+        items = data.get("items", [])
 
-        if not lista:
+        if not items:
             break
 
-        all_data.extend(lista)
+        all_data.extend(items)
 
-        if len(lista) < 100:
+        if len(items) < 100:
             break
 
         page += 1
@@ -166,7 +163,7 @@ def get_baixa_parcela(parcela_id):
             resultado.append({
                 "id_parcela": parcela_id,
                 "data_pagamento": b.get("data_pagamento"),
-                "conta_financeira": (b.get("conta_financeira") or {}).get("nome"),
+                "conta_financeira": b.get("conta_financeira"),
                 "metodo_pagamento": b.get("metodo_pagamento")
             })
 
@@ -183,13 +180,10 @@ def get_all_baixas():
         if (datetime.now() - BAIXAS_CACHE_TIME).seconds < CACHE_TTL:
             return BAIXAS_CACHE
 
-    filtro = {
-        "data_vencimento_de": "2000-01-01",
-        "data_vencimento_ate": "2100-12-31"
-    }
+    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
+    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
 
-    pagar = fetch_all_pages("/contas-a-pagar/buscar", filtro)
-    receber = fetch_all_pages("/contas-a-receber/buscar", filtro)
+    print(f"PAGAR: {len(pagar)} | RECEBER: {len(receber)}")
 
     ids = [
         i.get("id")
@@ -208,28 +202,23 @@ def get_all_baixas():
     BAIXAS_CACHE = resultado
     BAIXAS_CACHE_TIME = datetime.now()
 
+    print(f"💰 Total baixas: {len(resultado)}")
+
     return resultado
 
 
 # =========================
-# FINANCEIRO (ENRIQUECIDO)
+# FINANCEIRO
 # =========================
 def get_financeiro():
 
-    filtro = {
-        "data_vencimento_de": "2000-01-01",
-        "data_vencimento_ate": "2100-12-31"
-    }
+    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar")
+    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar")
 
-    pagar = fetch_all_pages("/contas-a-pagar/buscar", filtro)
-    receber = fetch_all_pages("/contas-a-receber/buscar", filtro)
+    print(f"PAGAR: {len(pagar)} | RECEBER: {len(receber)}")
 
     baixas = get_all_baixas()
-
-    # 🔥 indexa baixas por parcela
-    mapa_baixas = {}
-    for b in baixas:
-        mapa_baixas[b["id_parcela"]] = b
+    mapa_baixas = {b["id_parcela"]: b for b in baixas}
 
     financeiro = []
 
@@ -253,20 +242,16 @@ def get_financeiro():
             "data_vencimento": item.get("data_vencimento"),
             "data_competencia": item.get("data_competencia"),
 
-            # 🔥 data final (baixa OU lançamento)
             "data_pagamento": (
-                baixa.get("data_pagamento")
-                if baixa else item.get("data_pagamento")
+                baixa["data_pagamento"] if baixa else item.get("data_pagamento")
             ),
 
             "conta_financeira": (
-                baixa.get("conta_financeira")
-                if baixa else None
+                baixa["conta_financeira"] if baixa else None
             ),
 
             "metodo_pagamento": (
-                baixa.get("metodo_pagamento")
-                if baixa else None
+                baixa["metodo_pagamento"] if baixa else None
             ),
 
             "fornecedor": nome,
