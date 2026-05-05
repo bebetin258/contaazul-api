@@ -108,19 +108,22 @@ def extract_items(data):
 
 
 # =========================
-# PAGINAÇÃO
+# PAGINAÇÃO CORRIGIDA
 # =========================
 def fetch_all_pages(endpoint):
 
     all_data = []
     page = 1
 
+    hoje = datetime.today()
+    inicio = hoje - timedelta(days=3650)  # 10 anos
+
     while True:
         params = {
             "pagina": page,
             "tamanho_pagina": 100,
-            "data_vencimento_de": "2000-01-01",
-            "data_vencimento_ate": "2100-12-31"
+            "data_vencimento_de": inicio.strftime("%Y-%m-%d"),
+            "data_vencimento_ate": hoje.strftime("%Y-%m-%d")
         }
 
         response = requests.get(
