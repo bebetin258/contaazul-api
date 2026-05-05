@@ -145,7 +145,7 @@ def fetch_all_pages(endpoint, params=None):
 
 
 # =========================
-# BAIXAS (THREAD + CACHE)
+# BAIXAS
 # =========================
 def get_baixa_parcela(parcela_id):
     try:
@@ -166,9 +166,8 @@ def get_baixa_parcela(parcela_id):
             resultado.append({
                 "id_parcela": parcela_id,
                 "data_pagamento": b.get("data_pagamento"),
-                "banco": (b.get("conta_financeira") or {}).get("nome"),
-                "metodo_pagamento": b.get("metodo_pagamento"),
-                "tipo_evento_financeiro": b.get("tipo_evento_financeiro")
+                "conta_financeira": (b.get("conta_financeira") or {}).get("nome"),
+                "metodo_pagamento": b.get("metodo_pagamento")
             })
 
         return resultado
@@ -189,10 +188,9 @@ def get_all_baixas():
         "data_vencimento_ate": "2100-12-31"
     }
 
-    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar", filtro)
-    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar", filtro)
+    pagar = fetch_all_pages("/contas-a-pagar/buscar", filtro)
+    receber = fetch_all_pages("/contas-a-receber/buscar", filtro)
 
-    # 🔥 só quem tem pagamento
     ids = [
         i.get("id")
         for i in pagar + receber
@@ -214,16 +212,24 @@ def get_all_baixas():
 
 
 # =========================
-# FINANCEIRO
+# FINANCEIRO (ENRIQUECIDO)
 # =========================
 def get_financeiro():
+
     filtro = {
         "data_vencimento_de": "2000-01-01",
         "data_vencimento_ate": "2100-12-31"
     }
 
-    pagar = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar", filtro)
-    receber = fetch_all_pages("/v1/financeiro/eventos-financeiros/contas-a-receber/buscar", filtro)
+    pagar = fetch_all_pages("/contas-a-pagar/buscar", filtro)
+    receber = fetch_all_pages("/contas-a-receber/buscar", filtro)
+
+    baixas = get_all_baixas()
+
+    # 🔥 indexa baixas por parcela
+    mapa_baixas = {}
+    for b in baixas:
+        mapa_baixas[b["id_parcela"]] = b
 
     financeiro = []
 
@@ -237,6 +243,8 @@ def get_financeiro():
         if isinstance(item.get("cliente"), dict):
             nome = item["cliente"].get("nome")
 
+        baixa = mapa_baixas.get(item.get("id"))
+
         return {
             "id": item.get("id"),
             "tipo_evento_financeiro": tipo,
@@ -244,19 +252,36 @@ def get_financeiro():
             "total": item.get("total"),
             "data_vencimento": item.get("data_vencimento"),
             "data_competencia": item.get("data_competencia"),
-            "data_pagamento": item.get("data_pagamento"),
+
+            # 🔥 data final (baixa OU lançamento)
+            "data_pagamento": (
+                baixa.get("data_pagamento")
+                if baixa else item.get("data_pagamento")
+            ),
+
+            "conta_financeira": (
+                baixa.get("conta_financeira")
+                if baixa else None
+            ),
+
+            "metodo_pagamento": (
+                baixa.get("metodo_pagamento")
+                if baixa else None
+            ),
+
             "fornecedor": nome,
+
             "categoria": (
                 item.get("categorias")[0]["nome"]
                 if item.get("categorias")
                 else None
             ),
+
             "centro_custo": (
                 item.get("centros_de_custo")[0]["nome"]
                 if item.get("centros_de_custo")
                 else None
-            ),
-            "atualizado_em": item.get("atualizado_em")
+            )
         }
 
     for item in pagar:
