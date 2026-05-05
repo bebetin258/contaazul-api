@@ -93,7 +93,22 @@ def get_headers():
 
 
 # =========================
-# PAGINAÇÃO CORRIGIDA
+# PARSER UNIVERSAL
+# =========================
+def extract_items(data):
+    if isinstance(data, list):
+        return data
+
+    return (
+        data.get("items")
+        or data.get("data")
+        or data.get("result")
+        or []
+    )
+
+
+# =========================
+# PAGINAÇÃO
 # =========================
 def fetch_all_pages(endpoint):
 
@@ -127,9 +142,9 @@ def fetch_all_pages(endpoint):
             break
 
         data = response.json()
+        items = extract_items(data)
 
-        # 🔥 CORREÇÃO DEFINITIVA
-        items = data.get("data", [])
+        print("REGISTROS NA PAGINA:", len(items))
 
         if not items:
             break
