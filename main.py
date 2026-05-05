@@ -93,7 +93,7 @@ def get_headers():
 
 
 # =========================
-# PAGINAÇÃO CORRETA
+# PAGINAÇÃO CORRIGIDA
 # =========================
 def fetch_all_pages(endpoint):
 
@@ -104,8 +104,6 @@ def fetch_all_pages(endpoint):
         params = {
             "pagina": page,
             "tamanho_pagina": 100,
-
-            # 🔥 OBRIGATÓRIO
             "data_vencimento_de": "2000-01-01",
             "data_vencimento_ate": "2100-12-31"
         }
@@ -125,11 +123,13 @@ def fetch_all_pages(endpoint):
             continue
 
         if response.status_code != 200:
-            print("ERRO REAL:", response.text)
+            print("ERRO:", response.text)
             break
 
         data = response.json()
-        items = data.get("items", [])
+
+        # 🔥 CORREÇÃO DEFINITIVA
+        items = data.get("data", [])
 
         if not items:
             break
