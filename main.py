@@ -93,37 +93,19 @@ def get_headers():
 
 
 # =========================
-# PARSER UNIVERSAL
-# =========================
-def extract_items(data):
-    if isinstance(data, list):
-        return data
-
-    return (
-        data.get("items")
-        or data.get("data")
-        or data.get("result")
-        or []
-    )
-
-
-# =========================
-# PAGINAÇÃO CORRIGIDA
+# PAGINAÇÃO CORRETA
 # =========================
 def fetch_all_pages(endpoint):
 
     all_data = []
     page = 1
 
-    hoje = datetime.today()
-    inicio = hoje - timedelta(days=3650)  # 10 anos
-
     while True:
         params = {
             "pagina": page,
             "tamanho_pagina": 100,
-            "data_vencimento_de": inicio.strftime("%Y-%m-%d"),
-            "data_vencimento_ate": hoje.strftime("%Y-%m-%d")
+            "data_vencimento_de": "2020-01-01",
+            "data_vencimento_ate": datetime.today().strftime("%Y-%m-%d")
         }
 
         response = requests.get(
@@ -145,7 +127,9 @@ def fetch_all_pages(endpoint):
             break
 
         data = response.json()
-        items = extract_items(data)
+
+        # 🔥 CORREÇÃO DEFINITIVA
+        items = data.get("itens", [])
 
         print("REGISTROS NA PAGINA:", len(items))
 
@@ -154,7 +138,9 @@ def fetch_all_pages(endpoint):
 
         all_data.extend(items)
 
-        if len(items) < 100:
+        total_paginas = data.get("total_paginas", 1)
+
+        if page >= total_paginas:
             break
 
         page += 1
