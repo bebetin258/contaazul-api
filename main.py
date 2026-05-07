@@ -24,7 +24,7 @@ TOKEN_FILE = "refresh_token.txt"
 # ==========================================
 def load_refresh_token():
 
-    # tenta arquivo primeiro
+    # tenta arquivo local
     if os.path.exists(TOKEN_FILE):
 
         with open(TOKEN_FILE, "r") as f:
@@ -34,7 +34,13 @@ def load_refresh_token():
             if token:
                 return token
 
-    raise Exception("refresh_token.txt não encontrado")
+    # fallback ENV
+    token_env = os.getenv("REFRESH_TOKEN")
+
+    if token_env:
+        return token_env
+
+    raise Exception("Nenhum refresh token encontrado")
 
 
 def save_refresh_token(token):
@@ -72,7 +78,7 @@ def refresh_access_token():
 
     ACCESS_TOKEN = data["access_token"]
 
-    # salva novo refresh token automaticamente
+    # salva novo refresh token
     novo_refresh = data.get("refresh_token")
 
     if novo_refresh:
@@ -147,16 +153,13 @@ def buscar_contas_receber():
         print(f"PÁGINA {pagina}")
         print(f"REGISTROS: {len(itens)}")
 
-        if not itens:
+        if len(itens) == 0:
             break
 
         todos.extend(itens)
 
-        total_paginas = data.get("total_paginas", 1)
-
-        print("TOTAL PAGINAS:", total_paginas)
-
-        if pagina >= total_paginas:
+        # acabou paginação
+        if len(itens) < 100:
             break
 
         pagina += 1
@@ -216,16 +219,13 @@ def buscar_contas_pagar():
         print(f"PÁGINA {pagina}")
         print(f"REGISTROS: {len(itens)}")
 
-        if not itens:
+        if len(itens) == 0:
             break
 
         todos.extend(itens)
 
-        total_paginas = data.get("total_paginas", 1)
-
-        print("TOTAL PAGINAS:", total_paginas)
-
-        if pagina >= total_paginas:
+        # acabou paginação
+        if len(itens) < 100:
             break
 
         pagina += 1
