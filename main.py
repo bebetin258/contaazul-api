@@ -1,7 +1,9 @@
 import os
+import threading
 import requests
-from requests.auth import HTTPBasicAuth
+
 from fastapi import FastAPI
+from requests.auth import HTTPBasicAuth
 
 app = FastAPI()
 
@@ -11,36 +13,31 @@ app = FastAPI()
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
-API_BASE_URL = "https://api-v2.contaazul.com"
-AUTH_URL = "https://auth.contaazul.com/oauth2/token"
-
-ACCESS_TOKEN = None
+API_BASE = "https://api-v2.contaazul.com"
+TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
 TOKEN_FILE = "refresh_token.txt"
 
+ACCESS_TOKEN = None
+
+token_lock = threading.Lock()
+
 
 # ==========================================
-# REFRESH TOKEN FILE
+# REFRESH TOKEN
 # ==========================================
 def load_refresh_token():
 
-    # tenta arquivo local
-    if os.path.exists(TOKEN_FILE):
+    if not os.path.exists(TOKEN_FILE):
+        raise Exception("refresh_token.txt não encontrado")
 
-        with open(TOKEN_FILE, "r") as f:
+    with open(TOKEN_FILE, "r") as f:
+        token = f.read().strip()
 
-            token = f.read().strip()
+    if not token:
+        raise Exception("refresh token vazio")
 
-            if token:
-                return token
-
-    # fallback ENV
-    token_env = os.getenv("REFRESH_TOKEN")
-
-    if token_env:
-        return token_env
-
-    raise Exception("Nenhum refresh token encontrado")
+    return token
 
 
 def save_refresh_token(token):
@@ -50,46 +47,53 @@ def save_refresh_token(token):
 
 
 # ==========================================
-# TOKEN
+# RENOVAR ACCESS TOKEN
 # ==========================================
 def refresh_access_token():
 
     global ACCESS_TOKEN
 
-    refresh_token = load_refresh_token()
+    with token_lock:
 
-    response = requests.post(
-        AUTH_URL,
-        auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-        },
-        timeout=30
-    )
+        refresh_token = load_refresh_token()
 
-    print("TOKEN STATUS:", response.status_code)
+        response = requests.post(
+            TOKEN_URL,
+            auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token
+            },
+            timeout=30
+        )
 
-    if response.status_code != 200:
-        print(response.text)
-        raise Exception("Erro ao renovar token")
+        print("TOKEN STATUS:", response.status_code)
 
-    data = response.json()
+        if response.status_code != 200:
 
-    ACCESS_TOKEN = data["access_token"]
+            print(response.text)
 
-    # salva novo refresh token
-    novo_refresh = data.get("refresh_token")
+            raise Exception(
+                "Refresh token inválido. "
+                "Gere um novo refresh token manualmente."
+            )
 
-    if novo_refresh:
+        data = response.json()
 
-        save_refresh_token(novo_refresh)
+        ACCESS_TOKEN = data["access_token"]
 
-        print("NOVO REFRESH TOKEN SALVO")
+        novo_refresh = data.get("refresh_token")
 
-    return ACCESS_TOKEN
+        if novo_refresh:
+            save_refresh_token(novo_refresh)
+            print("NOVO REFRESH TOKEN SALVO")
+
+        return ACCESS_TOKEN
 
 
+# ==========================================
+# HEADERS
+# ==========================================
 def get_headers():
 
     global ACCESS_TOKEN
@@ -104,77 +108,44 @@ def get_headers():
 
 
 # ==========================================
-# CONTAS A RECEBER
+# REQUEST COM AUTO REFRESH
 # ==========================================
-def buscar_contas_receber():
+def request_conta_azul(url, params=None):
 
-    todos = []
-    pagina = 1
+    global ACCESS_TOKEN
 
-    while True:
+    response = requests.get(
+        url,
+        headers=get_headers(),
+        params=params,
+        timeout=60
+    )
 
-        params = {
-            "pagina": pagina,
-            "tamanho_pagina": 100,
-            "data_vencimento_de": "2020-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
+    # TOKEN EXPIRADO
+    if response.status_code == 401:
+
+        print("TOKEN EXPIRADO - RENOVANDO")
+
+        refresh_access_token()
 
         response = requests.get(
-            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            url,
             headers=get_headers(),
             params=params,
             timeout=60
         )
 
-        print("URL:", response.url)
-        print("STATUS:", response.status_code)
-
-        # token expirou
-        if response.status_code == 401:
-
-            refresh_access_token()
-
-            response = requests.get(
-                f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-                headers=get_headers(),
-                params=params,
-                timeout=60
-            )
-
-        if response.status_code != 200:
-            print(response.text)
-            break
-
-        data = response.json()
-
-        itens = data.get("itens", [])
-
-        print(f"PÁGINA {pagina}")
-        print(f"REGISTROS: {len(itens)}")
-
-        if len(itens) == 0:
-            break
-
-        todos.extend(itens)
-
-        # acabou paginação
-        if len(itens) < 100:
-            break
-
-        pagina += 1
-
-    print("TOTAL FINAL:", len(todos))
-
-    return todos
+    return response
 
 
 # ==========================================
 # CONTAS A PAGAR
 # ==========================================
-def buscar_contas_pagar():
+@app.get("/contas-pagar")
+def contas_pagar():
 
     todos = []
+
     pagina = 1
 
     while True:
@@ -186,27 +157,13 @@ def buscar_contas_pagar():
             "data_vencimento_ate": "2035-12-31"
         }
 
-        response = requests.get(
-            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-            headers=get_headers(),
-            params=params,
-            timeout=60
+        response = request_conta_azul(
+            f"{API_BASE}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+            params=params
         )
 
         print("URL:", response.url)
         print("STATUS:", response.status_code)
-
-        # token expirou
-        if response.status_code == 401:
-
-            refresh_access_token()
-
-            response = requests.get(
-                f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-                headers=get_headers(),
-                params=params,
-                timeout=60
-            )
 
         if response.status_code != 200:
             print(response.text)
@@ -219,12 +176,12 @@ def buscar_contas_pagar():
         print(f"PÁGINA {pagina}")
         print(f"REGISTROS: {len(itens)}")
 
-        if len(itens) == 0:
+        if not itens:
             break
 
         todos.extend(itens)
 
-        # acabou paginação
+        # ultima página
         if len(itens) < 100:
             break
 
@@ -232,29 +189,7 @@ def buscar_contas_pagar():
 
     print("TOTAL FINAL:", len(todos))
 
-    return todos
-
-
-# ==========================================
-# ENDPOINTS
-# ==========================================
-@app.get("/contas-receber")
-def contas_receber():
-
-    dados = buscar_contas_receber()
-
     return {
-        "total": len(dados),
-        "itens": dados
-    }
-
-
-@app.get("/contas-pagar")
-def contas_pagar():
-
-    dados = buscar_contas_pagar()
-
-    return {
-        "total": len(dados),
-        "itens": dados
+        "total": len(todos),
+        "itens": todos
     }
