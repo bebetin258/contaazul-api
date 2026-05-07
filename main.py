@@ -1,6 +1,5 @@
 import requests
 import os
-from datetime import datetime
 from requests.auth import HTTPBasicAuth
 from fastapi import FastAPI
 
@@ -11,8 +10,6 @@ app = FastAPI()
 # ==========================================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-
-# 🔥 AGORA O REFRESH TOKEN VEM DO .ENV
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 API_BASE_URL = "https://api-v2.contaazul.com"
@@ -49,8 +46,7 @@ def refresh_access_token():
 
     ACCESS_TOKEN = data["access_token"]
 
-    # 🔥 IMPORTANTE
-    # a Conta Azul SEMPRE devolve um novo refresh token
+    # Conta Azul retorna novo refresh token
     novo_refresh = data.get("refresh_token")
 
     if novo_refresh:
@@ -58,9 +54,6 @@ def refresh_access_token():
 
         print("NOVO REFRESH TOKEN:")
         print(novo_refresh)
-
-        # ⚠️ COPIE DO LOG E ATUALIZE NO RENDER
-        # Environment -> REFRESH_TOKEN
 
     return ACCESS_TOKEN
 
@@ -79,12 +72,11 @@ def get_headers():
 
 
 # ==========================================
-# CONTAS A RECEBER
+# CONTAS A PAGAR
 # ==========================================
-def buscar_contas_receber():
+def buscar_contas_pagar():
 
     todos = []
-
     pagina = 1
 
     while True:
@@ -92,12 +84,14 @@ def buscar_contas_receber():
         params = {
             "pagina": pagina,
             "tamanho_pagina": 100,
+
+            # filtros obrigatórios
             "data_vencimento_de": "2020-01-01",
             "data_vencimento_ate": "2035-12-31"
         }
 
         response = requests.get(
-            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
             headers=get_headers(),
             params=params,
             timeout=60
@@ -106,13 +100,13 @@ def buscar_contas_receber():
         print("URL:", response.url)
         print("STATUS:", response.status_code)
 
-        # TOKEN EXPIROU
+        # token expirou
         if response.status_code == 401:
 
             refresh_access_token()
 
             response = requests.get(
-                f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+                f"{API_BASE_URL}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
                 headers=get_headers(),
                 params=params,
                 timeout=60
@@ -151,10 +145,10 @@ def buscar_contas_receber():
 # ==========================================
 # ENDPOINT
 # ==========================================
-@app.get("/contas-receber")
-def contas_receber():
+@app.get("/contas-pagar")
+def contas_pagar():
 
-    dados = buscar_contas_receber()
+    dados = buscar_contas_pagar()
 
     return {
         "total": len(dados),
