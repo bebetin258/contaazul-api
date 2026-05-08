@@ -28,26 +28,32 @@ REFRESH_FILE = "refresh_token.txt"
 ACCESS_TOKEN = None
 TOKEN_EXPIRES_AT = 0
 
-# trava global para impedir refresh simultâneo
+# trava global
 TOKEN_LOCK = threading.Lock()
 
 # ======================================================
-# REFRESH TOKEN FILE
+# REFRESH TOKEN
 # ======================================================
 
 def load_refresh_token():
 
-    if not os.path.exists(REFRESH_FILE):
-        raise Exception("refresh_token.txt não encontrado")
+    # 1 - tenta arquivo local
+    if os.path.exists(REFRESH_FILE):
 
-    with open(REFRESH_FILE, "r") as f:
+        with open(REFRESH_FILE, "r") as f:
 
-        token = f.read().strip()
+            token = f.read().strip()
 
-    if not token:
-        raise Exception("refresh token vazio")
+            if token:
+                return token
 
-    return token
+    # 2 - fallback ENV do Render
+    token_env = os.getenv("REFRESH_TOKEN")
+
+    if token_env:
+        return token_env
+
+    raise Exception("Nenhum refresh token encontrado")
 
 
 def save_refresh_token(token):
@@ -66,7 +72,7 @@ def refresh_access_token():
 
     with TOKEN_LOCK:
 
-        # evita refresh duplicado
+        # token ainda válido
         if ACCESS_TOKEN and time.time() < TOKEN_EXPIRES_AT:
             return ACCESS_TOKEN
 
@@ -88,7 +94,7 @@ def refresh_access_token():
 
             print(response.text)
 
-            raise Exception("Erro ao renovar token")
+            return None
 
         data = response.json()
 
@@ -96,7 +102,7 @@ def refresh_access_token():
 
         expires_in = data.get("expires_in", 3600)
 
-        # renova 5 minutos antes
+        # renova 5 min antes
         TOKEN_EXPIRES_AT = time.time() + expires_in - 300
 
         novo_refresh = data.get("refresh_token")
@@ -116,6 +122,13 @@ def refresh_access_token():
 def get_headers():
 
     token = refresh_access_token()
+
+    if not token:
+
+        raise Exception(
+            "Refresh token inválido. "
+            "Atualize REFRESH_TOKEN no Render."
+        )
 
     return {
         "Authorization": f"Bearer {token}",
@@ -146,7 +159,13 @@ def request_conta_azul(url, params=None):
         ACCESS_TOKEN = None
         TOKEN_EXPIRES_AT = 0
 
-        refresh_access_token()
+        token = refresh_access_token()
+
+        if not token:
+
+            return {
+                "erro": "refresh token inválido"
+            }
 
         response = requests.get(
             url,
@@ -185,6 +204,10 @@ def buscar_todos(endpoint):
             url,
             params=params
         )
+
+        # erro token
+        if isinstance(response, dict):
+            return response
 
         print("STATUS:", response.status_code)
 
@@ -261,6 +284,10 @@ def categorias_dre():
     response = request_conta_azul(
         f"{API_BASE}/v1/categorias-dre"
     )
+
+    # erro token
+    if isinstance(response, dict):
+        return response
 
     print("STATUS:", response.status_code)
 
