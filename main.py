@@ -259,7 +259,7 @@ def contas_receber():
 def categorias_dre():
 
     response = request_conta_azul(
-        f"{API_BASE}/v1/categorias/dre"
+        f"{API_BASE}/v1/categorias-dre"
     )
 
     print("STATUS:", response.status_code)
