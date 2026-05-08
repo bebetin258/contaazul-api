@@ -17,6 +17,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 API_BASE = "https://api-v2.contaazul.com"
+
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
 # ======================================================
@@ -26,7 +27,7 @@ TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 ACCESS_TOKEN = None
 TOKEN_EXPIRES_AT = 0
 
-# trava global
+# trava global refresh token
 TOKEN_LOCK = threading.Lock()
 
 # ======================================================
@@ -69,10 +70,10 @@ def refresh_access_token():
 
         expires_in = data.get("expires_in", 3600)
 
-        # renova 5 minutos antes
+        # renova 5 min antes
         TOKEN_EXPIRES_AT = time.time() + expires_in - 300
 
-        # atualiza refresh token em memória
+        # salva refresh token novo em memória
         novo_refresh = data.get("refresh_token")
 
         if novo_refresh:
@@ -193,14 +194,13 @@ def buscar_todos(endpoint, usar_data=True):
 
         data = response.json()
 
-        # alguns endpoints retornam itens
         itens = (
             data.get("itens")
             or data.get("data")
             or []
         )
 
-        # endpoint pode retornar lista direta
+        # endpoints que retornam lista direta
         if isinstance(data, list):
             itens = data
 
@@ -268,3 +268,55 @@ def categorias_dre():
         "/v1/financeiro/categorias-dre",
         usar_data=False
     )
+
+# ======================================================
+# IDS FINANCEIROS
+# ======================================================
+
+@app.get("/ids-financeiros")
+def ids_financeiros():
+
+    pagar = buscar_todos(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
+    )
+
+    receber = buscar_todos(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar"
+    )
+
+    itens = []
+
+    # ==========================================
+    # CONTAS A PAGAR
+    # ==========================================
+
+    for item in pagar.get("itens", []):
+
+        itens.append({
+            "id": item.get("id"),
+            "tipo": "DESPESA",
+            "status": item.get("status"),
+            "descricao": item.get("descricao"),
+            "valor": item.get("total"),
+            "data_vencimento": item.get("data_vencimento")
+        })
+
+    # ==========================================
+    # CONTAS A RECEBER
+    # ==========================================
+
+    for item in receber.get("itens", []):
+
+        itens.append({
+            "id": item.get("id"),
+            "tipo": "RECEITA",
+            "status": item.get("status"),
+            "descricao": item.get("descricao"),
+            "valor": item.get("total"),
+            "data_vencimento": item.get("data_vencimento")
+        })
+
+    return {
+        "total": len(itens),
+        "itens": itens
+    }
