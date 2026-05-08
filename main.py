@@ -14,12 +14,10 @@ app = FastAPI()
 
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 
 API_BASE = "https://api-v2.contaazul.com"
-
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
-
-REFRESH_FILE = "refresh_token.txt"
 
 # ======================================================
 # TOKEN CACHE
@@ -32,65 +30,27 @@ TOKEN_EXPIRES_AT = 0
 TOKEN_LOCK = threading.Lock()
 
 # ======================================================
-# LOAD REFRESH TOKEN
-# ======================================================
-
-def load_refresh_token():
-
-    # PRIORIDADE = ENV
-    token_env = os.getenv("REFRESH_TOKEN")
-
-    if token_env:
-        return token_env.strip()
-
-    # fallback arquivo local
-    if os.path.exists(REFRESH_FILE):
-
-        with open(REFRESH_FILE, "r") as f:
-
-            token = f.read().strip()
-
-            if token:
-                return token
-
-    raise Exception("Nenhum refresh token encontrado")
-
-# ======================================================
-# SAVE REFRESH TOKEN
-# ======================================================
-
-def save_refresh_token(token):
-
-    # atualiza memória runtime
-    os.environ["REFRESH_TOKEN"] = token
-
-    # salva runtime local
-    with open(REFRESH_FILE, "w") as f:
-        f.write(token)
-
-# ======================================================
-# REFRESH ACCESS TOKEN
+# REFRESH TOKEN
 # ======================================================
 
 def refresh_access_token():
 
     global ACCESS_TOKEN
     global TOKEN_EXPIRES_AT
+    global REFRESH_TOKEN
 
     with TOKEN_LOCK:
 
-        # token ainda válido
+        # reutiliza token válido
         if ACCESS_TOKEN and time.time() < TOKEN_EXPIRES_AT:
             return ACCESS_TOKEN
-
-        refresh_token = load_refresh_token()
 
         response = requests.post(
             TOKEN_URL,
             auth=HTTPBasicAuth(CLIENT_ID, CLIENT_SECRET),
             data={
                 "grant_type": "refresh_token",
-                "refresh_token": refresh_token
+                "refresh_token": REFRESH_TOKEN
             },
             timeout=30
         )
@@ -112,13 +72,16 @@ def refresh_access_token():
         # renova 5 minutos antes
         TOKEN_EXPIRES_AT = time.time() + expires_in - 300
 
+        # atualiza refresh token em memória
         novo_refresh = data.get("refresh_token")
 
         if novo_refresh:
 
-            save_refresh_token(novo_refresh)
+            REFRESH_TOKEN = novo_refresh
 
-            print("NOVO REFRESH TOKEN SALVO")
+            os.environ["REFRESH_TOKEN"] = novo_refresh
+
+            print("NOVO REFRESH TOKEN ATUALIZADO")
 
         return ACCESS_TOKEN
 
@@ -184,10 +147,10 @@ def request_conta_azul(url, params=None):
     return response
 
 # ======================================================
-# PAGINAÇÃO
+# PAGINAÇÃO GENÉRICA
 # ======================================================
 
-def buscar_todos(endpoint):
+def buscar_todos(endpoint, usar_data=True):
 
     pagina = 1
 
@@ -197,10 +160,14 @@ def buscar_todos(endpoint):
 
         params = {
             "pagina": pagina,
-            "tamanho_pagina": 100,
-            "data_vencimento_de": "2020-01-01",
-            "data_vencimento_ate": "2035-12-31"
+            "tamanho_pagina": 100
         }
+
+        # endpoints financeiros exigem datas
+        if usar_data:
+
+            params["data_vencimento_de"] = "2020-01-01"
+            params["data_vencimento_ate"] = "2035-12-31"
 
         url = f"{API_BASE}{endpoint}"
 
@@ -226,7 +193,16 @@ def buscar_todos(endpoint):
 
         data = response.json()
 
-        itens = data.get("itens", [])
+        # alguns endpoints retornam itens
+        itens = (
+            data.get("itens")
+            or data.get("data")
+            or []
+        )
+
+        # endpoint pode retornar lista direta
+        if isinstance(data, list):
+            itens = data
 
         print("REGISTROS:", len(itens))
 
@@ -288,29 +264,7 @@ def contas_receber():
 @app.get("/categorias-dre")
 def categorias_dre():
 
-    response = request_conta_azul(
-        f"{API_BASE}/v1/categorias-dre"
+    return buscar_todos(
+        "/v1/financeiro/categorias-dre",
+        usar_data=False
     )
-
-    # erro token
-    if isinstance(response, dict):
-        return response
-
-    print("STATUS:", response.status_code)
-
-    if response.status_code != 200:
-
-        return {
-            "erro": response.text
-        }
-
-    data = response.json()
-
-    if isinstance(data, list):
-
-        return {
-            "total": len(data),
-            "itens": data
-        }
-
-    return data
