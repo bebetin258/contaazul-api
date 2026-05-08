@@ -7,9 +7,9 @@ from requests.auth import HTTPBasicAuth
 
 app = FastAPI()
 
-# ==========================================
+# ======================================================
 # CONFIG
-# ==========================================
+# ======================================================
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
@@ -22,20 +22,19 @@ ACCESS_TOKEN = None
 
 token_lock = threading.Lock()
 
-
-# ==========================================
+# ======================================================
 # REFRESH TOKEN
-# ==========================================
+# ======================================================
 def load_refresh_token():
 
     if not os.path.exists(TOKEN_FILE):
-        raise Exception("refresh_token.txt não encontrado")
+        raise Exception("Arquivo refresh_token.txt não encontrado")
 
     with open(TOKEN_FILE, "r") as f:
         token = f.read().strip()
 
     if not token:
-        raise Exception("refresh token vazio")
+        raise Exception("Refresh token vazio")
 
     return token
 
@@ -46,9 +45,9 @@ def save_refresh_token(token):
         f.write(token)
 
 
-# ==========================================
-# RENOVAR ACCESS TOKEN
-# ==========================================
+# ======================================================
+# RENOVAR TOKEN
+# ======================================================
 def refresh_access_token():
 
     global ACCESS_TOKEN
@@ -73,10 +72,7 @@ def refresh_access_token():
 
             print(response.text)
 
-            raise Exception(
-                "Refresh token inválido. "
-                "Gere um novo refresh token manualmente."
-            )
+            raise Exception("Erro ao renovar token")
 
         data = response.json()
 
@@ -85,15 +81,17 @@ def refresh_access_token():
         novo_refresh = data.get("refresh_token")
 
         if novo_refresh:
+
             save_refresh_token(novo_refresh)
+
             print("NOVO REFRESH TOKEN SALVO")
 
         return ACCESS_TOKEN
 
 
-# ==========================================
+# ======================================================
 # HEADERS
-# ==========================================
+# ======================================================
 def get_headers():
 
     global ACCESS_TOKEN
@@ -107,12 +105,10 @@ def get_headers():
     }
 
 
-# ==========================================
+# ======================================================
 # REQUEST COM AUTO REFRESH
-# ==========================================
+# ======================================================
 def request_conta_azul(url, params=None):
-
-    global ACCESS_TOKEN
 
     response = requests.get(
         url,
@@ -138,9 +134,9 @@ def request_conta_azul(url, params=None):
     return response
 
 
-# ==========================================
+# ======================================================
 # CONTAS A PAGAR
-# ==========================================
+# ======================================================
 @app.get("/contas-pagar")
 def contas_pagar():
 
@@ -181,7 +177,64 @@ def contas_pagar():
 
         todos.extend(itens)
 
-        # ultima página
+        # ÚLTIMA PÁGINA
+        if len(itens) < 100:
+            break
+
+        pagina += 1
+
+    print("TOTAL FINAL:", len(todos))
+
+    return {
+        "total": len(todos),
+        "itens": todos
+    }
+
+
+# ======================================================
+# CONTAS A RECEBER
+# ======================================================
+@app.get("/contas-receber")
+def contas_receber():
+
+    todos = []
+
+    pagina = 1
+
+    while True:
+
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": 100,
+            "data_vencimento_de": "2020-01-01",
+            "data_vencimento_ate": "2035-12-31"
+        }
+
+        response = request_conta_azul(
+            f"{API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+            params=params
+        )
+
+        print("URL:", response.url)
+        print("STATUS:", response.status_code)
+
+        if response.status_code != 200:
+            print(response.text)
+            break
+
+        data = response.json()
+
+        itens = data.get("itens", [])
+
+        print(f"PÁGINA {pagina}")
+        print(f"REGISTROS: {len(itens)}")
+
+        if not itens:
+            break
+
+        todos.extend(itens)
+
+        # ÚLTIMA PÁGINA
         if len(itens) < 100:
             break
 
