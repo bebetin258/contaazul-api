@@ -1,58 +1,67 @@
-import os
-import threading
-import requests
-
 from fastapi import FastAPI
+from dotenv import load_dotenv
 from requests.auth import HTTPBasicAuth
+
+import requests
+import os
+import time
+import threading
+
+load_dotenv()
 
 app = FastAPI()
 
-# ======================================================
+# =========================
 # CONFIG
-# ======================================================
+# =========================
+
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
 API_BASE = "https://api-v2.contaazul.com"
+
 TOKEN_URL = "https://auth.contaazul.com/oauth2/token"
 
-TOKEN_FILE = "refresh_token.txt"
+# =========================
+# TOKEN CACHE
+# =========================
 
 ACCESS_TOKEN = None
+TOKEN_EXPIRES_AT = 0
 
-token_lock = threading.Lock()
+# trava global
+TOKEN_LOCK = threading.Lock()
 
-# ======================================================
-# REFRESH TOKEN
-# ======================================================
+# =========================
+# REFRESH TOKEN FILE
+# =========================
+
+REFRESH_FILE = "refresh_token.txt"
+
 def load_refresh_token():
 
-    if not os.path.exists(TOKEN_FILE):
-        raise Exception("Arquivo refresh_token.txt não encontrado")
-
-    with open(TOKEN_FILE, "r") as f:
-        token = f.read().strip()
-
-    if not token:
-        raise Exception("Refresh token vazio")
-
-    return token
-
+    with open(REFRESH_FILE, "r") as f:
+        return f.read().strip()
 
 def save_refresh_token(token):
 
-    with open(TOKEN_FILE, "w") as f:
+    with open(REFRESH_FILE, "w") as f:
         f.write(token)
 
+# =========================
+# REFRESH TOKEN
+# =========================
 
-# ======================================================
-# RENOVAR TOKEN
-# ======================================================
 def refresh_access_token():
 
     global ACCESS_TOKEN
+    global TOKEN_EXPIRES_AT
 
-    with token_lock:
+    with TOKEN_LOCK:
+
+        # outro endpoint já renovou
+        if ACCESS_TOKEN and time.time() < TOKEN_EXPIRES_AT:
+            return ACCESS_TOKEN
 
         refresh_token = load_refresh_token()
 
@@ -78,6 +87,11 @@ def refresh_access_token():
 
         ACCESS_TOKEN = data["access_token"]
 
+        expires_in = data.get("expires_in", 3600)
+
+        # renova 5 min antes
+        TOKEN_EXPIRES_AT = time.time() + expires_in - 300
+
         novo_refresh = data.get("refresh_token")
 
         if novo_refresh:
@@ -88,26 +102,23 @@ def refresh_access_token():
 
         return ACCESS_TOKEN
 
-
-# ======================================================
+# =========================
 # HEADERS
-# ======================================================
+# =========================
+
 def get_headers():
 
-    global ACCESS_TOKEN
-
-    if not ACCESS_TOKEN:
-        refresh_access_token()
+    token = refresh_access_token()
 
     return {
-        "Authorization": f"Bearer {ACCESS_TOKEN}",
-        "Accept": "application/json"
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
     }
 
+# =========================
+# REQUEST SAFE
+# =========================
 
-# ======================================================
-# REQUEST COM AUTO REFRESH
-# ======================================================
 def request_conta_azul(url, params=None):
 
     response = requests.get(
@@ -117,12 +128,12 @@ def request_conta_azul(url, params=None):
         timeout=60
     )
 
-    # TOKEN EXPIRADO
+    # token expirou inesperadamente
     if response.status_code == 401:
 
-        print("TOKEN EXPIRADO - RENOVANDO")
+        global ACCESS_TOKEN
 
-        refresh_access_token()
+        ACCESS_TOKEN = None
 
         response = requests.get(
             url,
@@ -131,150 +142,96 @@ def request_conta_azul(url, params=None):
             timeout=60
         )
 
-    return response
+    response.raise_for_status()
 
+    return response.json()
 
-# ======================================================
-# CONTAS A PAGAR
-# ======================================================
+# =========================
+# PAGINAÇÃO
+# =========================
+
+def buscar_todos(endpoint):
+
+    pagina = 1
+
+    todos = []
+
+    while True:
+
+        params = {
+            "pagina": pagina,
+            "tamanho_pagina": 100,
+            "data_vencimento_de": "2020-01-01",
+            "data_vencimento_ate": "2035-12-31"
+        }
+
+        url = f"{API_BASE}{endpoint}"
+
+        print(f"URL: {url}")
+        print(f"PÁGINA: {pagina}")
+
+        response = request_conta_azul(
+            url,
+            params=params
+        )
+
+        itens = (
+            response.get("itens")
+            or response.get("data")
+            or []
+        )
+
+        print("REGISTROS:", len(itens))
+
+        if not itens:
+            break
+
+        todos.extend(itens)
+
+        if len(itens) < 100:
+            break
+
+        pagina += 1
+
+    print("TOTAL FINAL:", len(todos))
+
+    return {"itens": todos}
+
+# =========================
+# ENDPOINTS
+# =========================
+
 @app.get("/contas-pagar")
 def contas_pagar():
 
-    todos = []
+    return buscar_todos(
+        "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar"
+    )
 
-    pagina = 1
-
-    while True:
-
-        params = {
-            "pagina": pagina,
-            "tamanho_pagina": 100,
-            "data_vencimento_de": "2020-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
-
-        response = request_conta_azul(
-            f"{API_BASE}/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-            params=params
-        )
-
-        print("URL:", response.url)
-        print("STATUS:", response.status_code)
-
-        if response.status_code != 200:
-            print(response.text)
-            break
-
-        data = response.json()
-
-        itens = data.get("itens", [])
-
-        print(f"PÁGINA {pagina}")
-        print(f"REGISTROS: {len(itens)}")
-
-        if not itens:
-            break
-
-        todos.extend(itens)
-
-        if len(itens) < 100:
-            break
-
-        pagina += 1
-
-    print("TOTAL FINAL:", len(todos))
-
-    return {
-        "total": len(todos),
-        "itens": todos
-    }
-
-
-# ======================================================
-# CONTAS A RECEBER
-# ======================================================
 @app.get("/contas-receber")
 def contas_receber():
 
-    todos = []
+    return buscar_todos(
+        "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar"
+    )
 
-    pagina = 1
+@app.get("/categorias")
+def categorias():
 
-    while True:
+    return request_conta_azul(
+        f"{API_BASE}/v1/categorias"
+    )
 
-        params = {
-            "pagina": pagina,
-            "tamanho_pagina": 100,
-            "data_vencimento_de": "2020-01-01",
-            "data_vencimento_ate": "2035-12-31"
-        }
-
-        response = request_conta_azul(
-            f"{API_BASE}/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-            params=params
-        )
-
-        print("URL:", response.url)
-        print("STATUS:", response.status_code)
-
-        if response.status_code != 200:
-            print(response.text)
-            break
-
-        data = response.json()
-
-        itens = data.get("itens", [])
-
-        print(f"PÁGINA {pagina}")
-        print(f"REGISTROS: {len(itens)}")
-
-        if not itens:
-            break
-
-        todos.extend(itens)
-
-        if len(itens) < 100:
-            break
-
-        pagina += 1
-
-    print("TOTAL FINAL:", len(todos))
-
-    return {
-        "total": len(todos),
-        "itens": todos
-    }
-
-
-# ======================================================
-# CATEGORIAS DRE
-# ======================================================
 @app.get("/categorias-dre")
 def categorias_dre():
 
-    response = request_conta_azul(
-        f"{API_BASE}/v1/categorias/dre"
+    return request_conta_azul(
+        f"{API_BASE}/v1/categorias-dre"
     )
 
-    print("URL:", response.url)
-    print("STATUS:", response.status_code)
+@app.get("/contas-financeiras")
+def contas_financeiras():
 
-    if response.status_code != 200:
-        print(response.text)
-
-        return {
-            "erro": response.text
-        }
-
-    data = response.json()
-
-    # caso a API devolva lista
-    if isinstance(data, list):
-
-        return {
-            "total": len(data),
-            "itens": data
-        }
-
-    # caso devolva objeto
-    return data
+    return request_conta_azul(
+        f"{API_BASE}/v1/contas-financeiras"
+    )
