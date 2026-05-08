@@ -32,12 +32,18 @@ TOKEN_EXPIRES_AT = 0
 TOKEN_LOCK = threading.Lock()
 
 # ======================================================
-# REFRESH TOKEN
+# LOAD REFRESH TOKEN
 # ======================================================
 
 def load_refresh_token():
 
-    # 1 - tenta arquivo local
+    # PRIORIDADE = ENV
+    token_env = os.getenv("REFRESH_TOKEN")
+
+    if token_env:
+        return token_env.strip()
+
+    # fallback arquivo local
     if os.path.exists(REFRESH_FILE):
 
         with open(REFRESH_FILE, "r") as f:
@@ -47,17 +53,18 @@ def load_refresh_token():
             if token:
                 return token
 
-    # 2 - fallback ENV do Render
-    token_env = os.getenv("REFRESH_TOKEN")
-
-    if token_env:
-        return token_env
-
     raise Exception("Nenhum refresh token encontrado")
 
+# ======================================================
+# SAVE REFRESH TOKEN
+# ======================================================
 
 def save_refresh_token(token):
 
+    # atualiza memória runtime
+    os.environ["REFRESH_TOKEN"] = token
+
+    # salva runtime local
     with open(REFRESH_FILE, "w") as f:
         f.write(token)
 
@@ -102,7 +109,7 @@ def refresh_access_token():
 
         expires_in = data.get("expires_in", 3600)
 
-        # renova 5 min antes
+        # renova 5 minutos antes
         TOKEN_EXPIRES_AT = time.time() + expires_in - 300
 
         novo_refresh = data.get("refresh_token")
