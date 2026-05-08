@@ -177,7 +177,6 @@ def contas_pagar():
 
         todos.extend(itens)
 
-        # ÚLTIMA PÁGINA
         if len(itens) < 100:
             break
 
@@ -234,7 +233,6 @@ def contas_receber():
 
         todos.extend(itens)
 
-        # ÚLTIMA PÁGINA
         if len(itens) < 100:
             break
 
@@ -246,3 +244,37 @@ def contas_receber():
         "total": len(todos),
         "itens": todos
     }
+
+
+# ======================================================
+# CATEGORIAS DRE
+# ======================================================
+@app.get("/categorias-dre")
+def categorias_dre():
+
+    response = request_conta_azul(
+        f"{API_BASE}/v1/categorias/dre"
+    )
+
+    print("URL:", response.url)
+    print("STATUS:", response.status_code)
+
+    if response.status_code != 200:
+        print(response.text)
+
+        return {
+            "erro": response.text
+        }
+
+    data = response.json()
+
+    # caso a API devolva lista
+    if isinstance(data, list):
+
+        return {
+            "total": len(data),
+            "itens": data
+        }
+
+    # caso devolva objeto
+    return data
